@@ -179,7 +179,7 @@ class MordredManager:
             q = "SELECT * " \
                 "FROM CauldronApp_task " \
                 "WHERE worker_id = '' " \
-                "LIMIT ;"
+                "LIMIT 1;"
             try:
                 self.cursor.execute(q)
                 self.conn.commit()

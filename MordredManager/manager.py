@@ -168,6 +168,7 @@ class MordredManager:
                                             passwd=self.db_config['password'],
                                             db=self.db_config['name'],
                                             port=self.db_config['port'])
+                print(dir(MySQLdb))
             except MySQLdb.OperationalError as e:
                 logging.warning("RETRY IN 2 SECONDS... code[{}] {}".format(e.args[0], e.args[1]))
                 time.sleep(2)
@@ -184,7 +185,7 @@ class MordredManager:
                 self.cursor.execute(q)
                 self.conn.commit()
                 ready = True
-            except MySQLdb.OperationalError as e:
+            except (MySQLdb.OperationalError, MySQLdb.ProgrammingError) as e:
                 logging.warning("RETRY IN 2 SECONDS... code[{}] {}".format(e.args[0], e.args[1]))
                 time.sleep(2)
 

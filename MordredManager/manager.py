@@ -18,8 +18,6 @@ class MordredManager:
         self.cursor = None
 
 
-        self.cursor = self.conn.cursor()
-
     def run(self):
         while not self.conn:
             logging.info("Trying to connect to the database")

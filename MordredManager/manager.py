@@ -13,10 +13,28 @@ DASHBOARD_LOGS = '/dashboard_logs'
 class MordredManager:
     def __init__(self, db_config):
         self.worker_id = config.WORKER_NAME  # TODO: Change the worker name
-        self.conn = MySQLdb.connect(host=db_config['host'], user=db_config['user'], passwd=db_config['password'], db=db_config['name'], port=db_config['port'])
+        self.db_config = db_config
+        self.conn = None
+        self.cursor = None
+
+
         self.cursor = self.conn.cursor()
 
     def run(self):
+        while not self.conn:
+            logging.info("Trying to connect to the database")
+            try:
+                self.conn = MySQLdb.connect(host=self.db_config['host'],
+                                            user=self.db_config['user'],
+                                            passwd=self.db_config['password'],
+                                            db=self.db_config['name'],
+                                            port=self.db_config['port'])
+            except Exception as e:
+                logging.warning("Unable to connect... Sleep 2 seconds: {}".format(e))
+                time.sleep(2)
+        if not self.cursor:
+            self.cursor = self.conn.cursor()
+
         waiting_msg = True
         while True:
             if waiting_msg:

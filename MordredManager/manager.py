@@ -17,21 +17,9 @@ class MordredManager:
         self.conn = None
         self.cursor = None
 
-
     def run(self):
-        while not self.conn:
-            logging.info("Trying to connect to the database")
-            try:
-                self.conn = MySQLdb.connect(host=self.db_config['host'],
-                                            user=self.db_config['user'],
-                                            passwd=self.db_config['password'],
-                                            db=self.db_config['name'],
-                                            port=self.db_config['port'])
-            except Exception as e:
-                logging.warning("Unable to connect... Sleep 2 seconds: {}".format(e))
-                time.sleep(2)
-        if not self.cursor:
-            self.cursor = self.conn.cursor()
+        if not self.conn:
+            self._wait_until_db_ready()
 
         waiting_msg = True
         while True:
@@ -46,6 +34,7 @@ class MordredManager:
                 continue
             task_id, repo_id, user_id = task
             logging.info('New task found!')
+
             # Get the token for the task
             token = self._get_token(user_id)
             if not token:
@@ -169,6 +158,38 @@ class MordredManager:
         row = self.cursor.fetchone()
         self.conn.commit()
         return row
+
+    def _wait_until_db_ready(self):
+        while not self.conn:
+            logging.info("Trying to connect to the database")
+            try:
+                self.conn = MySQLdb.connect(host=self.db_config['host'],
+                                            user=self.db_config['user'],
+                                            passwd=self.db_config['password'],
+                                            db=self.db_config['name'],
+                                            port=self.db_config['port'])
+            except MySQLdb.OperationalError as e:
+                logging.warning("RETRY IN 2 SECONDS... code[{}] {}".format(e.args[0], e.args[1]))
+                time.sleep(2)
+        logging.info('We have the connection! Wait until the tables are created...')
+        self.cursor = self.conn.cursor()
+        ready = False
+        while not ready:
+            # Just to check the database is ready
+            q = "SELECT * " \
+                "FROM CauldronApp_task " \
+                "WHERE worker_id = '' " \
+                "LIMIT ;"
+            try:
+                self.cursor.execute(q)
+                self.conn.commit()
+                ready = True
+            except MySQLdb.OperationalError as e:
+                logging.warning("RETRY IN 2 SECONDS... code[{}] {}".format(e.args[0], e.args[1]))
+                time.sleep(2)
+
+
+
 
 
 if __name__ == "__main__":

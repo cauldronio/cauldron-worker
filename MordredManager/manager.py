@@ -34,54 +34,78 @@ class MordredManager:
         self.logger.setLevel(logging.DEBUG)
 
     def run(self):
-        if not self.conn:
-            self._wait_until_db_ready()
-
+        """
+        Infinitely wait for tasks and run mordred for the tasks found
+        :return:
+        """
+        self._wait_until_db_ready()
+        self.recovery()
         waiting_msg = True
         while True:
             if waiting_msg:
-                self.logger.info('Waiting for new repositories...')
+                self.logger.info('Waiting for new tasks...')
                 waiting_msg = False
 
-            # Wait for a task
             task = self._get_task()
             if not task:
                 time.sleep(1)
                 continue
-            task_id, repo_id, user_id = task
             self.logger.info('New task found!')
-
-            # Get the token for the task
-            token = self._get_token(user_id)
-            if not token:
-                self.logger.error("Token for task {} not found".format(task_id))
-                self._complete_task(task_id, 'ERROR')
-
-            # Get the repo for the task
-            repo = self._get_repo(repo_id)
-            if not repo:
-                self.logger.error("Repo for task {} not found".format(task_id))
-                self._complete_task(task_id, 'ERROR')
-
-            url_gh, url_git = repo
-            self.logger.info("Analyzing {}".format(url_gh))
-            # Let's run mordred in a command and get the output
-            file_logs = '{}/repository_{}.log'.format(DASHBOARD_LOGS, repo_id)
-            with open(file_logs, 'w') as f_log:
-                proc = subprocess.Popen(['python3', '-u', 'mordred/mordred.py', url_gh, url_git, token],
-                                        stdout=f_log,
-                                        stderr=subprocess.STDOUT)
-                proc.wait()
-                self.logger.info("Mordred analysis for {} finished with code: {}".format(url_gh, proc.returncode))
-
-            # Check the output
-            if proc.returncode != 0:
-                self.logger.error('An error occurred while analyzing %s' % url_gh)
-                self._complete_task(task_id, 'ERROR')
-            else:
-                self._complete_task(task_id, 'COMPLETED')
-
+            task_id, repo_id, user_id = task
+            self.analyze_task(task_id, repo_id, user_id)
             waiting_msg = True
+
+    def analyze_task(self, task_id, repo_id, user_id):
+        """
+        Analyze a full task with mordred
+        :param task_id:
+        :param repo_id:
+        :param user_id:
+        :return:
+        """
+        # Get the token for the task
+        token = self._get_token(user_id)
+        if not token:
+            self.logger.error("Token for task {} not found".format(task_id))
+            self._complete_task(task_id, 'ERROR')
+
+        # Get the repo for the task
+        repo = self._get_repo(repo_id)
+        if not repo:
+            self.logger.error("Repo for task {} not found".format(task_id))
+            self._complete_task(task_id, 'ERROR')
+
+        url_gh, url_git = repo
+        self.logger.info("Analyzing {}".format(url_gh))
+        # Let's run mordred in a command and get the output
+        file_logs = '{}/repository_{}.log'.format(DASHBOARD_LOGS, repo_id)
+        with open(file_logs, 'w') as f_log:
+            proc = subprocess.Popen(['python3', '-u', 'mordred/mordred.py', url_gh, url_git, token],
+                                    stdout=f_log,
+                                    stderr=subprocess.STDOUT)
+            proc.wait()
+            self.logger.info("Mordred analysis for {} finished with code: {}".format(url_gh, proc.returncode))
+
+        # Check the output
+        if proc.returncode != 0:
+            self.logger.error('An error occurred while analyzing %s' % url_gh)
+            self._complete_task(task_id, 'ERROR')
+        else:
+            self._complete_task(task_id, 'COMPLETED')
+
+    def recovery(self):
+        """
+        Try to recover task with the worker name and analyze them
+        :return:
+        """
+        while True:
+            task = self._get_pending_task()
+            if task:
+                task_id, repo_id, user_id = task
+                self.analyze_task(task_id, repo_id, user_id)
+            else:
+                break
+
 
     def _get_task(self):
         """
@@ -176,6 +200,10 @@ class MordredManager:
         return row
 
     def _wait_until_db_ready(self):
+        """
+        This block until can connect to the database and the task-table is available
+        :return:
+        """
         while not self.conn:
             self.logger.info("Trying to connect to the database")
             try:
@@ -206,6 +234,26 @@ class MordredManager:
                 self.logger.info("RETRY IN 2 SECONDS...")
                 time.sleep(2)
         self.logger.info("We are ready!")
+
+    def _get_pending_task(self):
+        """
+        Check if I the worker has pending tasks (Maybe because got down)
+        :return:
+        """
+        q = "SELECT id, repository_id, gh_user_id " \
+            "FROM CauldronApp_task " \
+            "WHERE worker_id = '{}' " \
+            "ORDER BY created " \
+            "LIMIT 1;".format(self.worker_id)
+        self.cursor.execute(q)
+        row = self.cursor.fetchone()
+        self.conn.commit()
+        if row is None:
+            self.logger.info("No pending tasks")
+        else:
+            self.logger.info("We got a pending task! Retry to analyze it")
+        return row
+
 
 
 if __name__ == "__main__":

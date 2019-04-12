@@ -4,19 +4,34 @@ import subprocess
 import MySQLdb
 
 import config
+import argparse
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.Logger(name=config.WORKER_NAME)
+# CREATE A LOGGER CONFIG
+log_format = logging.Formatter("[%(name)s] %(asctime)s [%(levelname)s] %(message)s", "%d-%m-%Y %H:%M:%S")
+log_handler = logging.StreamHandler()
+log_handler.setLevel(logging.DEBUG)
+log_handler.setFormatter(log_format)
 
 DASHBOARD_LOGS = '/dashboard_logs'
 
 
 class MordredManager:
-    def __init__(self, db_config):
-        self.worker_id = config.WORKER_NAME  # TODO: Change the worker name
-        self.db_config = db_config
+    def __init__(self, name=None):
+        self.db_config = {
+            'host': config.DB_HOST,
+            'user': config.DB_USER,
+            'password': config.DB_PASSWORD,
+            'name': config.DB_NAME,
+            'port': config.DB_PORT
+        }
+
+        self.worker_id = name or config.WORKER_NAME
         self.conn = None
         self.cursor = None
+
+        self.logger = logging.getLogger(self.worker_id)
+        self.logger.addHandler(log_handler)
+        self.logger.setLevel(logging.DEBUG)
 
     def run(self):
         if not self.conn:
@@ -25,7 +40,7 @@ class MordredManager:
         waiting_msg = True
         while True:
             if waiting_msg:
-                logger.info('Waiting for new repositories...')
+                self.logger.info('Waiting for new repositories...')
                 waiting_msg = False
 
             # Wait for a task
@@ -34,22 +49,22 @@ class MordredManager:
                 time.sleep(1)
                 continue
             task_id, repo_id, user_id = task
-            logger.info('New task found!')
+            self.logger.info('New task found!')
 
             # Get the token for the task
             token = self._get_token(user_id)
             if not token:
-                logger.error("Token for task {} not found".format(task_id))
+                self.logger.error("Token for task {} not found".format(task_id))
                 self._complete_task(task_id, 'ERROR')
 
             # Get the repo for the task
             repo = self._get_repo(repo_id)
             if not repo:
-                logger.error("Repo for task {} not found".format(task_id))
+                self.logger.error("Repo for task {} not found".format(task_id))
                 self._complete_task(task_id, 'ERROR')
 
             url_gh, url_git = repo
-            logger.info("Analyzing {}".format(url_gh))
+            self.logger.info("Analyzing {}".format(url_gh))
             # Let's run mordred in a command and get the output
             file_logs = '{}/repository_{}.log'.format(DASHBOARD_LOGS, repo_id)
             with open(file_logs, 'w') as f_log:
@@ -57,11 +72,11 @@ class MordredManager:
                                         stdout=f_log,
                                         stderr=subprocess.STDOUT)
                 proc.wait()
-                logger.info("Mordred analysis for {} finished with code: {}".format(url_gh, proc.returncode))
+                self.logger.info("Mordred analysis for {} finished with code: {}".format(url_gh, proc.returncode))
 
             # Check the output
             if proc.returncode != 0:
-                logger.error('An error occurred while analyzing %s' % url_gh)
+                self.logger.error('An error occurred while analyzing %s' % url_gh)
                 self._complete_task(task_id, 'ERROR')
             else:
                 self._complete_task(task_id, 'COMPLETED')
@@ -128,7 +143,7 @@ class MordredManager:
         row = self.cursor.fetchone()
         self.conn.commit()
         if not row:
-            logger.error('Unknown task id to complete: {}'.format(id))
+            self.logger.error('Unknown task id to complete: {}'.format(id))
             return
         repo_id, user_id, worker_id, created, started = row
 
@@ -162,7 +177,7 @@ class MordredManager:
 
     def _wait_until_db_ready(self):
         while not self.conn:
-            logger.info("Trying to connect to the database")
+            self.logger.info("Trying to connect to the database")
             try:
                 self.conn = MySQLdb.connect(host=self.db_config['host'],
                                             user=self.db_config['user'],
@@ -170,10 +185,10 @@ class MordredManager:
                                             db=self.db_config['name'],
                                             port=self.db_config['port'])
             except MySQLdb.OperationalError as e:
-                logger.warning("Error from database. code[{}] {}".format(e.args[0], e.args[1]))
-                logger.info("RETRY IN 2 SECONDS...")
+                self.logger.warning("Error from database. code[{}] {}".format(e.args[0], e.args[1]))
+                self.logger.info("RETRY IN 2 SECONDS...")
                 time.sleep(2)
-        logger.info('We have the connection! Wait until the tables are created...')
+        self.logger.info('We have the connection! Wait until the tables are created...')
         self.cursor = self.conn.cursor()
         ready = False
         while not ready:
@@ -187,21 +202,16 @@ class MordredManager:
                 self.conn.commit()
                 ready = True
             except (MySQLdb.OperationalError, MySQLdb.ProgrammingError) as e:
-                logger.warning("Error from database. code[{}] {}".format(e.args[0], e.args[1]))
-                logger.info("RETRY IN 2 SECONDS...")
+                self.logger.warning("Error from database. code[{}] {}".format(e.args[0], e.args[1]))
+                self.logger.info("RETRY IN 2 SECONDS...")
                 time.sleep(2)
-        logger.info("We are ready!")
-
-
+        self.logger.info("We are ready!")
 
 
 if __name__ == "__main__":
-    db = {
-        'host': config.DB_HOST,
-        'user': config.DB_USER,
-        'password': config.DB_PASSWORD,
-        'name': config.DB_NAME,
-        'port': config.DB_PORT
-    }
-    manager = MordredManager(db)
+    parser = argparse.ArgumentParser(description='Wait for projects to be available for analyzing')
+    parser.add_argument('--name', type=str, help="Name for the worker", default="")
+    args = parser.parse_args()
+
+    manager = MordredManager(args.name)
     manager.run()

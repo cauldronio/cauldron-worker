@@ -12,7 +12,7 @@ log_handler = logging.StreamHandler()
 log_handler.setLevel(logging.DEBUG)
 log_handler.setFormatter(log_format)
 
-DASHBOARD_LOGS = '/dashboard_logs'
+DASHBOARD_LOGS = '/tmp/dashboard_logs'
 
 
 class MordredManager:

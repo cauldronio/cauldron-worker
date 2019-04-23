@@ -76,10 +76,14 @@ class MordredManager:
             self._complete_task(task_id, 'ERROR')
 
         url_gh, url_git = repo
-        self.logger.info("Analyzing {}".format(url_gh))
+        
+        # Update the log location in task object
+        file_log = '{}/task_{}.log'.format(DASHBOARD_LOGS, task_id)
+        self._set_file_log(task_id, file_log)
+        
         # Let's run mordred in a command and get the output
-        file_logs = '{}/repository_{}.log'.format(DASHBOARD_LOGS, repo_id)
-        with open(file_logs, 'w') as f_log:
+        self.logger.info("Analyzing {}".format(url_gh))
+        with open(file_log, 'w') as f_log:
             proc = subprocess.Popen(['python3', '-u', 'mordred/mordred.py', url_gh, url_git, token],
                                     stdout=f_log,
                                     stderr=subprocess.STDOUT)
@@ -105,7 +109,6 @@ class MordredManager:
                 self.analyze_task(task_id, repo_id, user_id)
             else:
                 break
-
 
     def _get_task(self):
         """
@@ -160,7 +163,7 @@ class MordredManager:
         """
 
         # Get the task info
-        q = "SELECT repository_id, gh_user_id, worker_id, created, started " \
+        q = "SELECT repository_id, gh_user_id, worker_id, created, started, log_file " \
             "FROM CauldronApp_task " \
             "WHERE id = '{}';".format(task_id)
         self.cursor.execute(q)
@@ -169,7 +172,7 @@ class MordredManager:
         if not row:
             self.logger.error('Unknown task id to complete: {}'.format(id))
             return
-        repo_id, user_id, worker_id, created, started = row
+        repo_id, user_id, worker_id, created, started, log_file = row
 
         # Delete the task
         q = "DELETE FROM CauldronApp_task " \
@@ -179,9 +182,22 @@ class MordredManager:
 
         # Create completed task
         q = "INSERT INTO CauldronApp_completedtask " \
-            "(repository_id, gh_user_id, created, started, completed, status) " \
+            "(task_id, repository_id, gh_user_id, created, started, completed, status, log_file) " \
             "VALUES" \
-            "('{}', '{}', '{}', '{}', LOCALTIMESTAMP(), '{}');".format(repo_id, user_id, created, started, status)
+            "('{}', '{}', '{}', '{}', '{}', LOCALTIMESTAMP(), '{}', '{}');".format(task_id, repo_id, user_id, created, started, status, log_file)
+        self.cursor.execute(q)
+        self.conn.commit()
+
+    def _set_file_log(self, task_id, file_log):
+        """
+        Update the log location for this task
+        :param task_id: ID of the task
+        :param file_log: Absolute path to the logs
+        :return:
+        """
+        q = "UPDATE CauldronApp_task " \
+            "SET log_file = '{}' " \
+            "WHERE id='{}';".format(file_log, task_id)
         self.cursor.execute(q)
         self.conn.commit()
 
@@ -251,9 +267,14 @@ class MordredManager:
         if row is None:
             self.logger.info("No pending tasks")
         else:
-            self.logger.info("We got a pending task! Retry to analyze it")
+            self.logger.info("We got a pending task! Try to analyze it again")
+            # Update the task start time
+            task_id, repo_id, user_id = row
+            q = "UPDATE CauldronApp_task " \
+                "SET started = LOCALTIMESTAMP() " \
+                "WHERE repository_id='{}';".format(repo_id)
+            self.cursor.execute(q)
         return row
-
 
 
 if __name__ == "__main__":

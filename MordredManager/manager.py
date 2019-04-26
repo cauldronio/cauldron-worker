@@ -12,7 +12,7 @@ log_handler = logging.StreamHandler()
 log_handler.setLevel(logging.DEBUG)
 log_handler.setFormatter(log_format)
 
-DASHBOARD_LOGS = '/dashboard_logs'
+DASHBOARD_LOGS = '/tmp/dashboard_logs'
 
 
 class MordredManager:
@@ -63,39 +63,61 @@ class MordredManager:
         :param user_id:
         :return:
         """
-        # Get the token for the task
-        token = self._get_token(user_id)
-        if not token:
-            self.logger.error("Token for task {} not found".format(task_id))
-            self._complete_task(task_id, 'ERROR')
-
         # Get the repo for the task
         repo = self._get_repo(repo_id)
         if not repo:
             self.logger.error("Repo for task {} not found".format(task_id))
             self._complete_task(task_id, 'ERROR')
+            return
 
-        url_gh, url_git = repo
-        
+        url, backend, index_name = repo
+
+        # Get the token for the task
+        token = self._get_token(backend, user_id)
+        if not token and backend != 'git':
+            self.logger.error("Token for task {} not found".format(task_id))
+            self._complete_task(task_id, 'ERROR')
+            return
+
         # Update the log location in task object
         file_log = '{}/task_{}.log'.format(DASHBOARD_LOGS, task_id)
         self._set_file_log(task_id, file_log)
         
         # Let's run mordred in a command and get the output
-        self.logger.info("Analyzing {}".format(url_gh))
+        self.logger.info("Analyzing [{} | {}]".format(backend, url))
         with open(file_log, 'w') as f_log:
-            proc = subprocess.Popen(['python3', '-u', 'mordred/mordred.py', url_gh, url_git, token],
-                                    stdout=f_log,
-                                    stderr=subprocess.STDOUT)
+            cmd = ['python3', '-u', 'mordred/mordred.py',
+                   '--backend', backend,
+                   '--url', url,
+                   '--index', index_name]
+            if backend != 'git':
+                cmd.extend(['--token', token])
+
+            proc = subprocess.Popen(cmd, stdout=f_log, stderr=subprocess.STDOUT)
             proc.wait()
-            self.logger.info("Mordred analysis for {} finished with code: {}".format(url_gh, proc.returncode))
+            self.logger.info("Mordred analysis for [{}|{}] finished with code: {}".format(backend, url, proc.returncode))
 
         # Check the output
         if proc.returncode != 0:
-            self.logger.error('An error occurred while analyzing %s' % url_gh)
+            self.logger.error('An error occurred while analyzing [{}|{}]'.format(backend, url))
             self._complete_task(task_id, 'ERROR')
+            return
         else:
             self._complete_task(task_id, 'COMPLETED')
+            return
+
+    def recovery(self):
+        """
+        Try to recover task with the worker name and analyze them
+        :return:
+        """
+        while True:
+            task = self._get_pending_task()
+            if task:
+                task_id, repo_id, user_id = task
+                self.analyze_task(task_id, repo_id, user_id)
+            else:
+                self._complete_task(task_id, 'COMPLETED')
 
     def recovery(self):
         """
@@ -115,7 +137,7 @@ class MordredManager:
         Try to get a task, this locks the row taken until finish
         :return: Task row
         """
-        q = "SELECT id, repository_id, gh_user_id " \
+        q = "SELECT id, repository_id, user_id " \
             "FROM CauldronApp_task " \
             "WHERE worker_id = '' " \
             "ORDER BY created " \
@@ -138,18 +160,32 @@ class MordredManager:
 
         return task_id, repo_id, user_id
 
-    def _get_token(self, user_id):
+    def _get_token(self, backend, user_id):
         """
         Get the user token from the user id
-        :param user_id:
+        :param backend: github, gitlab, git...
+        :param user_id: User id from django
         :return:
         """
-        q = "SELECT token " \
-            "FROM CauldronApp_githubuser " \
-            "WHERE id = {};".format(user_id)
-        self.cursor.execute(q)
-        row = self.cursor.fetchone()
-        self.conn.commit()
+        if backend == 'git':
+            return None
+        elif backend == 'github':
+            q = "SELECT token " \
+                "FROM CauldronApp_githubuser " \
+                "WHERE user_id = {};".format(user_id)
+            self.cursor.execute(q)
+            row = self.cursor.fetchone()
+            self.conn.commit()
+        elif backend == 'gitlab':
+            q = "SELECT token " \
+                "FROM CauldronApp_gitlabuser " \
+                "WHERE user_id = {};".format(user_id)
+            self.cursor.execute(q)
+            row = self.cursor.fetchone()
+            self.conn.commit()
+        else:
+            row = None
+
         if row:
             row = row[0]
         return row
@@ -163,7 +199,7 @@ class MordredManager:
         """
 
         # Get the task info
-        q = "SELECT repository_id, gh_user_id, worker_id, created, started, log_file " \
+        q = "SELECT repository_id, user_id, worker_id, created, started, log_file " \
             "FROM CauldronApp_task " \
             "WHERE id = '{}';".format(task_id)
         self.cursor.execute(q)
@@ -180,9 +216,9 @@ class MordredManager:
         self.cursor.execute(q)
         self.conn.commit()
 
-        # Create completed task
+        # Create CompletedTask
         q = "INSERT INTO CauldronApp_completedtask " \
-            "(task_id, repository_id, gh_user_id, created, started, completed, status, log_file) " \
+            "(task_id, repository_id, user_id, created, started, completed, status, log_file) " \
             "VALUES" \
             "('{}', '{}', '{}', '{}', '{}', LOCALTIMESTAMP(), '{}', '{}');".format(task_id, repo_id, user_id, created, started, status, log_file)
         self.cursor.execute(q)
@@ -207,7 +243,7 @@ class MordredManager:
         :param repo_id:
         :return:
         """
-        q = "SELECT url_gh, url_git " \
+        q = "SELECT url, backend, index_name " \
             "FROM CauldronApp_repository " \
             "WHERE id = {};".format(repo_id)
         self.cursor.execute(q)
@@ -256,7 +292,7 @@ class MordredManager:
         Check if I the worker has pending tasks (Maybe because got down)
         :return:
         """
-        q = "SELECT id, repository_id, gh_user_id " \
+        q = "SELECT id, repository_id, user_id " \
             "FROM CauldronApp_task " \
             "WHERE worker_id = '{}' " \
             "ORDER BY created " \

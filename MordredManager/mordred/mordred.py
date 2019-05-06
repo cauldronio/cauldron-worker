@@ -13,6 +13,8 @@ from sirmordred.task_enrich import TaskEnrich
 from sirmordred.task_projects import TaskProjects
 from sirmordred.task_panels import TaskPanels, TaskPanelsMenu
 
+import sqlalchemy
+
 # logging.basicConfig(level=logging.INFO)
 
 CONFIG_PATH = 'mordred/setup-default.cfg'
@@ -125,7 +127,14 @@ def _get_raw(config, backend):
 def _get_enrich(config, backend):
     logging.info("Enriching data for %s", backend)
     TaskProjects(config).execute()
-    task = TaskEnrich(config, backend_section=backend)
+    task = None
+    while not task:
+        try:
+            task = TaskEnrich(config, backend_section=backend)
+        except sqlalchemy.exc.InternalError:
+            # There is a race condition in the code
+            task = None
+
     try:
         task.execute()
         logging.info("Data for %s enriched!", backend)

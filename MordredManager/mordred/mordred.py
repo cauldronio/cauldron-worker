@@ -84,7 +84,8 @@ def _create_projects_file(backend, url):
 
 def _create_config(projects_file, backend, token, index_name):
     cfg = Config(CONFIG_PATH)
-    cfg.set_param(backend, 'api-token', token)
+    if backend != 'git':
+        cfg.set_param(backend, 'api-token', token)
     cfg.set_param('projects', 'projects_file', projects_file)
     cfg.set_param('git', 'raw_index', "git_raw_{}".format(index_name))
     cfg.set_param('git', 'enriched_index', "git_enrich_{}".format(index_name))

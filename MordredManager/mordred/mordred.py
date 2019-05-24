@@ -14,6 +14,8 @@ from sirmordred.task_projects import TaskProjects
 from sirmordred.task_panels import TaskPanels, TaskPanelsMenu
 
 import sqlalchemy
+import ssl
+from elasticsearch.connection import create_ssl_context
 
 # logging.basicConfig(level=logging.INFO)
 
@@ -33,7 +35,10 @@ def run_mordred(backend, url, token, index_name):
 def _update_aliases(cfg):
     # TODO: Verify SSL Elasticsearch
     conf = cfg.get_conf()
-    es = Elasticsearch([conf['es_enrichment']['url']], timeout=100, verify_certs=False, use_ssl=True)
+    context = create_ssl_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    es = Elasticsearch([conf['es_enrichment']['url']], timeout=100, verify_certs=False, use_ssl=True, ssl_context=context)
 
     put_alias_no_except(es, index='git_aoc_enriched_*', name='git_aoc_enriched')
     put_alias_no_except(es, index='git_enrich_*', name='git_enrich')

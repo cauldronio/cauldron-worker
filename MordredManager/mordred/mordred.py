@@ -38,7 +38,7 @@ def _update_aliases(cfg):
     context = create_ssl_context()
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
-    es = Elasticsearch([conf['es_enrichment']['url']], timeout=100, verify_certs=False, use_ssl=True, ssl_context=context)
+    es = Elasticsearch([conf['es_enrichment']['url']], timeout=100, use_ssl=True, ssl_context=context)
 
     put_alias_no_except(es, index='git_aoc_enriched_*', name='git_aoc_enriched')
     put_alias_no_except(es, index='git_enrich_*', name='git_enrich')
@@ -46,10 +46,6 @@ def _update_aliases(cfg):
 
     put_alias_no_except(es, index='github_enrich_*', name='github_enrich')
     put_alias_no_except(es, index='github_raw_*', name='github_raw')
-    put_alias_no_except(es, index='github_issues_raw_*', name='github_issues_raw')
-    put_alias_no_except(es, index='github_issues_enriched_*', name='github_issues_enriched')
-    put_alias_no_except(es, index='github_pulls_raw_*', name='github_pulls_raw')
-    put_alias_no_except(es, index='github_pulls_enriched_*', name='github_pulls_enriched')
 
     put_alias_no_except(es, index='gitlab_raw_*', name='gitlab_raw')
     put_alias_no_except(es, index='gitlab_enriched_*', name='gitlab_enriched')

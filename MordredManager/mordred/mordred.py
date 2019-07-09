@@ -50,6 +50,13 @@ def _update_aliases(cfg):
     put_alias_no_except(es, index='gitlab_raw_*', name='gitlab_raw')
     put_alias_no_except(es, index='gitlab_enriched_*', name='gitlab_enriched')
 
+    put_alias_no_except(es, index='git_enrich_*', name='ocean')
+    put_alias_no_except(es, index='github_enrich_*', name='ocean')
+    put_alias_no_except(es, index='gitlab_enriched_*', name='ocean')
+
+    put_alias_no_except(es, index='github_enrich_*', name='ocean_tickets')
+    put_alias_no_except(es, index='gitlab_enriched_*', name='ocean_tickets')
+
 
 def put_alias_no_except(es, index, name):
     try:

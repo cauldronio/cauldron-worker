@@ -4,6 +4,9 @@ import tempfile
 import os
 import logging
 import argparse
+import math
+from datetime import datetime
+
 from elasticsearch import Elasticsearch
 from elasticsearch.exceptions import NotFoundError
 
@@ -11,7 +14,6 @@ from sirmordred.config import Config
 from sirmordred.task_collection import TaskRawDataCollection
 from sirmordred.task_enrich import TaskEnrich
 from sirmordred.task_projects import TaskProjects
-from sirmordred.task_panels import TaskPanels, TaskPanelsMenu
 
 import sqlalchemy
 import ssl
@@ -24,12 +26,12 @@ JSON_DIR_PATH = 'projects_json'
 
 
 def run_mordred(backend, url, token, index_name):
+    print("\n====== Starts (UTC) ======\n{}\n==========================\n".format(datetime.now()))
     projects_file = _create_projects_file(backend, url)
     cfg = _create_config(projects_file, backend, token, index_name)
     _get_raw(cfg, backend)
     _get_enrich(cfg, backend)
     _update_aliases(cfg)
-    # _get_panels(cfg)
 
 
 def _update_aliases(cfg):
@@ -42,12 +44,12 @@ def _update_aliases(cfg):
 
     put_alias_no_except(es, index='git_aoc_enriched_*', name='git_aoc_enriched')
     put_alias_no_except(es, index='git_enrich_*', name='git_enrich')
-    put_alias_no_except(es, index='git_raw_*', name='git_raw')
+    #put_alias_no_except(es, index='git_raw_*', name='git_raw')
 
     put_alias_no_except(es, index='github_enrich_*', name='github_enrich')
-    put_alias_no_except(es, index='github_raw_*', name='github_raw')
+    #put_alias_no_except(es, index='github_raw_*', name='github_raw')
 
-    put_alias_no_except(es, index='gitlab_raw_*', name='gitlab_raw')
+    #put_alias_no_except(es, index='gitlab_raw_*', name='gitlab_raw')
     put_alias_no_except(es, index='gitlab_enriched_*', name='gitlab_enriched')
 
     put_alias_no_except(es, index='git_enrich_*', name='ocean')
@@ -125,11 +127,23 @@ def _get_raw(config, backend):
     # I am not using arthur
     task = TaskRawDataCollection(config, backend_section=backend)
     try:
-        task.execute()
+        repositories = task.execute()
+        if len(repositories) != 1:
+            logging.error("Critical error: More than 1 repository found in the output")
+        repo = repositories[0]
+        if 'error' in repo and repo['error']:
+            if repo['error'].startswith('RateLimitError'):
+                restart_minutes = math.ceil(float(repo['error'].split(' ')[-1])/60) + 10
+                logging.warning("RateLimitError. This task will be restarted in: {} minutes".format(restart_minutes))
+                sys.exit(restart_minutes)
+            else:
+                logging.error(repo['error'])
+                sys.exit(1)
+
         logging.info("Loading raw data for %s finished!", backend)
     except Exception as e:
-        logging.warning("Error loading raw data from %s. Raising exception", backend)
-        raise
+        logging.warning("Error loading raw data from {}. Raising exception. Cause: {}".format(backend, e))
+        sys.exit(1)
 
 
 def _get_enrich(config, backend):
@@ -148,15 +162,7 @@ def _get_enrich(config, backend):
         logging.info("Data for %s enriched!", backend)
     except Exception as e:
         logging.warning("Error enriching data for %s. Raising exception", backend)
-        raise
-
-
-def _get_panels(config):
-    task = TaskPanels(config)
-    task.execute()
-
-    task = TaskPanelsMenu(config)
-    task.execute()
+        sys.exit(1)
 
 
 if __name__ == '__main__':
@@ -166,4 +172,8 @@ if __name__ == '__main__':
     parser.add_argument('--token', type=str, help='token for the analysis', default="")
     parser.add_argument('--index', type=str, help='index for ES')
     args = parser.parse_args()
-    run_mordred(args.backend, args.url, args.token, args.index)
+    try:
+        run_mordred(args.backend, args.url, args.token, args.index)
+    except Exception:
+        logging.error("Finished with errors")
+        sys.exit(1)

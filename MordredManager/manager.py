@@ -2,6 +2,7 @@ import time
 import logging
 import subprocess
 import MySQLdb
+import datetime
 
 import config
 import argparse
@@ -80,12 +81,13 @@ class MordredManager:
             return
 
         # Update the log location in task object
-        file_log = '{}/task_{}.log'.format(DASHBOARD_LOGS, task_id)
+        file_log = '{}/repo_{}.log'.format(DASHBOARD_LOGS, repo_id)
         self._set_file_log(task_id, file_log)
         
         # Let's run mordred in a command and get the output
         self.logger.info("Analyzing [{} | {}]".format(backend, url))
-        with open(file_log, 'w') as f_log:
+        # TODO: Improve as a function call
+        with open(file_log, 'a') as f_log:
             cmd = ['python3', '-u', 'mordred/mordred.py',
                    '--backend', backend,
                    '--url', url,
@@ -98,26 +100,20 @@ class MordredManager:
             self.logger.info("Mordred analysis for [{}|{}] finished with code: {}".format(backend, url, proc.returncode))
 
         # Check the output
-        if proc.returncode != 0:
+        if proc.returncode == 1:
             self.logger.error('An error occurred while analyzing [{}|{}]'.format(backend, url))
             self._complete_task(task_id, 'ERROR')
+            return
+        elif proc.returncode > 1:
+            wait_minutes = proc.returncode
+            pending_time = datetime.datetime.now() + datetime.timedelta(minutes=wait_minutes)
+            self.logger.error('RateLimitError restart at [{}]'.format(pending_time))
+            self._update_task_rate_time(task_id, pending_time)
+
             return
         else:
             self._complete_task(task_id, 'COMPLETED')
             return
-
-    def recovery(self):
-        """
-        Try to recover task with the worker name and analyze them
-        :return:
-        """
-        while True:
-            task = self._get_pending_task()
-            if task:
-                task_id, repo_id, user_id = task
-                self.analyze_task(task_id, repo_id, user_id)
-            else:
-                self._complete_task(task_id, 'COMPLETED')
 
     def recovery(self):
         """
@@ -137,12 +133,13 @@ class MordredManager:
         Try to get a task, this locks the row taken until finish
         :return: Task row
         """
+        now = datetime.datetime.now()
         q = "SELECT id, repository_id, user_id " \
             "FROM CauldronApp_task " \
-            "WHERE worker_id = '' " \
+            "WHERE worker_id = '' and rate_time < '{}' " \
             "ORDER BY created " \
             "LIMIT 1 " \
-            "FOR UPDATE;"
+            "FOR UPDATE;".format(now.strftime('%Y-%m-%d %H:%M:%S'))
         self.cursor.execute(q)
         row = self.cursor.fetchone()
         if row is None:
@@ -153,8 +150,10 @@ class MordredManager:
         # We got one, lets update fast and RELEASE THE LOCK
         task_id, repo_id, user_id = row
         q = "UPDATE CauldronApp_task " \
-            "SET worker_id = '{}', started = LOCALTIMESTAMP() " \
-            "WHERE repository_id='{}';".format(self.worker_id, repo_id)
+            "SET worker_id = '{}', started = '{}' " \
+            "WHERE id='{}';".format(self.worker_id,
+                                    now.strftime('%Y-%m-%d %H:%M:%S'),
+                                    task_id)
         self.cursor.execute(q)
         self.conn.commit()
 
@@ -308,9 +307,17 @@ class MordredManager:
             task_id, repo_id, user_id = row
             q = "UPDATE CauldronApp_task " \
                 "SET started = LOCALTIMESTAMP() " \
-                "WHERE repository_id='{}';".format(repo_id)
+                "WHERE id='{}';".format(task_id)
             self.cursor.execute(q)
         return row
+
+    def _update_task_rate_time(self, task_id, rate_time):
+        q = "UPDATE CauldronApp_task " \
+            "SET rate_time = '{}'," \
+            "worker_id = '' " \
+            "WHERE id='{}';".format(rate_time.strftime('%Y-%m-%d %H:%M:%S'), task_id)
+        self.cursor.execute(q)
+        self.conn.commit()
 
 
 if __name__ == "__main__":

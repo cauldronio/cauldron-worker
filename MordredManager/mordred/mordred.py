@@ -29,9 +29,14 @@ def run_mordred(backend, url, token, index_name):
     print("\n====== Starts (UTC) ======\n{}\n==========================\n".format(datetime.now()))
     projects_file = _create_projects_file(backend, url)
     cfg = _create_config(projects_file, backend, token, index_name)
-    _get_raw(cfg, backend)
-    _get_enrich(cfg, backend)
+    result_raw = _get_raw(cfg, backend)
+    result_enrich = _get_enrich(cfg, backend)
     _update_aliases(cfg)
+    # Check errors
+    if result_raw:
+        sys.exit(result_raw)
+    if result_enrich:
+        sys.exit(result_enrich)
 
 
 def _update_aliases(cfg):
@@ -122,6 +127,12 @@ def _create_config(projects_file, backend, token, index_name):
 
 
 def _get_raw(config, backend):
+    """
+    Execute the collection of raw data. If a exception is occurred it is returned
+    :param config:
+    :param backend:
+    :return: None if everything was ok, 1 for fail, other for minutes to restart
+    """
     logging.info("Loading raw data for %s", backend)
     TaskProjects(config).execute()
     # I am not using arthur
@@ -135,15 +146,16 @@ def _get_raw(config, backend):
             if repo['error'].startswith('RateLimitError'):
                 restart_minutes = math.ceil(float(repo['error'].split(' ')[-1])/60) + 10
                 logging.warning("RateLimitError. This task will be restarted in: {} minutes".format(restart_minutes))
-                sys.exit(restart_minutes)
+                return restart_minutes
             else:
                 logging.error(repo['error'])
-                sys.exit(1)
+                return 1
 
         logging.info("Loading raw data for %s finished!", backend)
+        return None
     except Exception as e:
-        logging.warning("Error loading raw data from {}. Raising exception. Cause: {}".format(backend, e))
-        sys.exit(1)
+        logging.warning("Error loading raw data from {}. Cause: {}".format(backend, e))
+        return 1
 
 
 def _get_enrich(config, backend):
@@ -159,10 +171,11 @@ def _get_enrich(config, backend):
 
     try:
         task.execute()
-        logging.info("Data for %s enriched!", backend)
+        print("Data for %s enriched!", backend)
     except Exception as e:
         logging.warning("Error enriching data for %s. Raising exception", backend)
-        sys.exit(1)
+        return 1
+    return None
 
 
 if __name__ == '__main__':

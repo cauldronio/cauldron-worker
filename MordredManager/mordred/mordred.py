@@ -171,7 +171,7 @@ def _get_enrich(config, backend):
 
     try:
         task.execute()
-        print("Data for %s enriched!", backend)
+        print("Data for {} enriched!".format(backend))
     except Exception as e:
         logging.warning("Error enriching data for %s. Raising exception", backend)
         return 1

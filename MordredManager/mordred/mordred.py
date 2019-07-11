@@ -36,6 +36,7 @@ def run_mordred(backend, url, token, index_name):
     if result_raw:
         sys.exit(result_raw)
     if result_enrich:
+        print("RateLimit for your token. The task has been delayed for {} minutes".format(result_enrich))
         sys.exit(result_enrich)
 
 
@@ -159,7 +160,7 @@ def _get_raw(config, backend):
 
 
 def _get_enrich(config, backend):
-    logging.info("Enriching data for %s", backend)
+    print("Enriching data for {}".format(backend))
     TaskProjects(config).execute()
     task = None
     while not task:
@@ -171,7 +172,7 @@ def _get_enrich(config, backend):
 
     try:
         task.execute()
-        print("Data for {} enriched!".format(backend))
+        print("Data enriched for {}".format(backend))
     except Exception as e:
         logging.warning("Error enriching data for %s. Raising exception", backend)
         return 1

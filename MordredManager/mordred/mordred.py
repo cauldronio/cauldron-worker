@@ -36,7 +36,6 @@ def run_mordred(backend, url, token, index_name):
     if result_raw:
         sys.exit(result_raw)
     if result_enrich:
-        print("RateLimit for your token. The task has been delayed for {} minutes".format(result_enrich))
         sys.exit(result_enrich)
 
 

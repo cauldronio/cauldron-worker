@@ -1,1 +1,1 @@
-mysqlclient
+sqlalchemy

@@ -32,6 +32,7 @@ def run_mordred(backend, url, token, index_name):
     result_raw = _get_raw(cfg, backend)
     result_enrich = _get_enrich(cfg, backend)
     _update_aliases(cfg)
+    print("\n====== Finish (UTC) ======\n{}\n==========================\n".format(datetime.now()))
     # Check errors
     if result_raw:
         sys.exit(result_raw)

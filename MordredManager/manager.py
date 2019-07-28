@@ -184,9 +184,9 @@ class MordredManager:
             now = datetime.datetime.now()
             # Get the tasks id with a token ready and randomly selected
             task = session.query(self.models['Task']). \
-                join(self.models['Task_Tokens']). \
-                join(self.models['Token']).\
-                filter(self.models['Token'].rate_time < now).\
+                outerjoin(self.models['Task_Tokens']). \
+                outerjoin(self.models['Token']).\
+                filter(sqlalchemy.or_(self.models['Token'].rate_time < now, self.models['Token'].rate_time == None)).\
                 filter(self.models['Task'].worker_id == '').\
                 group_by(self.models['Task_Tokens'].token_id).\
                 order_by(func.rand()).\

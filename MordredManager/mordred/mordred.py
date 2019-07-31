@@ -25,10 +25,10 @@ CONFIG_PATH = 'mordred/setup-default.cfg'
 JSON_DIR_PATH = 'projects_json'
 
 
-def run_mordred(backend, url, token, index_name):
+def run_mordred(backend, url, token):
     print("\n====== Starts (UTC) ======\n{}\n==========================\n".format(datetime.now()))
     projects_file = _create_projects_file(backend, url)
-    cfg = _create_config(projects_file, backend, token, index_name)
+    cfg = _create_config(projects_file, backend, token)
     result_raw = _get_raw(cfg, backend)
     result_enrich = _get_enrich(cfg, backend)
     _update_aliases(cfg)
@@ -40,6 +40,13 @@ def run_mordred(backend, url, token, index_name):
         sys.exit(result_enrich)
 
 
+# TODO: Delete these 2 functions and create the alias for these indices with Ansible
+#  (There are some examples in the playbooks):
+# git_enrich_index -> git_enrich
+# git_aoc_enriched_index -> git_aoc_enriched
+# github_enrich_index -> github_enrich
+# gitlab_enriched_index -> gitlab_enriched
+
 def _update_aliases(cfg):
     # TODO: Verify SSL Elasticsearch
     conf = cfg.get_conf()
@@ -50,12 +57,9 @@ def _update_aliases(cfg):
 
     put_alias_no_except(es, index='git_aoc_enriched_*', name='git_aoc_enriched')
     put_alias_no_except(es, index='git_enrich_*', name='git_enrich')
-    #put_alias_no_except(es, index='git_raw_*', name='git_raw')
 
     put_alias_no_except(es, index='github_enrich_*', name='github_enrich')
-    #put_alias_no_except(es, index='github_raw_*', name='github_raw')
 
-    #put_alias_no_except(es, index='gitlab_raw_*', name='gitlab_raw')
     put_alias_no_except(es, index='gitlab_enriched_*', name='gitlab_enriched')
 
     put_alias_no_except(es, index='git_enrich_*', name='ocean')
@@ -71,6 +75,8 @@ def put_alias_no_except(es, index, name):
         es.indices.put_alias(index=index, name=name)
     except NotFoundError:
         pass
+
+## END TODO
 
 
 def _create_projects_file(backend, url):
@@ -100,29 +106,22 @@ def _create_projects_file(backend, url):
     return projects_file.name
 
 
-def _create_config(projects_file, backend, token, index_name):
+def _create_config(projects_file, backend, token):
     cfg = Config(CONFIG_PATH)
     if backend != 'git':
         cfg.set_param(backend, 'api-token', token)
     cfg.set_param('projects', 'projects_file', projects_file)
-    cfg.set_param('git', 'raw_index', "git_raw_{}".format(index_name))
-    cfg.set_param('git', 'enriched_index', "git_enrich_{}".format(index_name))
-    cfg.set_param('github', 'raw_index', "github_raw_{}".format(index_name))
-    cfg.set_param('github', 'enriched_index', "github_enrich_{}".format(index_name))
-    cfg.set_param('github:issue', 'raw_index', "github_issues_raw_{}".format(index_name))
-    cfg.set_param('github:issue', 'enriched_index', "github_issues_enriched_{}".format(index_name))
-    cfg.set_param('github:pull', 'raw_index', "github_pulls_raw_{}".format(index_name))
-    cfg.set_param('github:pull', 'enriched_index', "github_pulls_enriched_{}".format(index_name))
-    cfg.set_param('enrich_areas_of_code:git', 'in_index', "git_raw_{}".format(index_name))
-    cfg.set_param('enrich_areas_of_code:git', 'out_index', "git_aoc_enriched_{}".format(index_name))
-    cfg.set_param('enrich_onion:git', 'in_index', "git_enriched_{}".format(index_name))
-    cfg.set_param('enrich_onion:git', 'out_index', "git_onion_enriched_{}".format(index_name))
-    cfg.set_param('enrich_onion:github', 'in_index_iss', "github_issues_enriched_{}".format(index_name))
-    cfg.set_param('enrich_onion:github', 'in_index_prs', "github_pulls_enriched_{}".format(index_name))
-    cfg.set_param('enrich_onion:github', 'out_index_iss', "github_issues_onion_enriched_{}".format(index_name))
-    cfg.set_param('enrich_onion:github', 'out_index_prs', "github_prs_onion_enriched_{}".format(index_name))
-    cfg.set_param('gitlab', 'raw_index', "gitlab_raw_{}".format(index_name))
-    cfg.set_param('gitlab', 'enriched_index', "gitlab_enriched_{}".format(index_name))
+    # GIT
+    cfg.set_param('git', 'raw_index', "git_raw_index")
+    cfg.set_param('git', 'enriched_index', "git_enrich_index")
+    cfg.set_param('enrich_areas_of_code:git', 'in_index', "git_raw_index")
+    cfg.set_param('enrich_areas_of_code:git', 'out_index', "git_aoc_enriched_index")
+    # GITHUB
+    cfg.set_param('github', 'raw_index', "github_raw_index")
+    cfg.set_param('github', 'enriched_index', "github_enrich_index")
+    # GITLAB
+    cfg.set_param('gitlab', 'raw_index', "gitlab_raw_index")
+    cfg.set_param('gitlab', 'enriched_index', "gitlab_enriched_index")
 
     return cfg
 
@@ -184,10 +183,9 @@ if __name__ == '__main__':
     parser.add_argument('--backend', type=str, help='Backend to analyze')
     parser.add_argument('--url', type=str, help='URL repository to analyze')
     parser.add_argument('--token', type=str, help='token for the analysis', default="")
-    parser.add_argument('--index', type=str, help='index for ES')
     args = parser.parse_args()
     try:
-        run_mordred(args.backend, args.url, args.token, args.index)
+        run_mordred(args.backend, args.url, args.token)
     except Exception:
         logging.error("Finished with errors")
         sys.exit(1)

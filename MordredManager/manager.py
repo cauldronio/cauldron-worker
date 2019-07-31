@@ -119,7 +119,7 @@ class MordredManager:
             Logger.error("Repo for task {} not found".format(task_id))
             self._complete_task(task_id, 'ERROR')
             return
-        url, backend, index_name = repo
+        url, backend = repo
         # Get the token for the task
         token = self._get_token(task_id)
         if not token and backend != 'git':
@@ -141,8 +141,7 @@ class MordredManager:
         with open(file_log, 'a') as f_log:
             cmd = ['python3', '-u', 'mordred/mordred.py',
                    '--backend', backend,
-                   '--url', url,
-                   '--index', index_name]
+                   '--url', url]
             if backend != 'git':
                 cmd.extend(['--token', token_key])
 
@@ -271,14 +270,14 @@ class MordredManager:
         """
         Get the repository information for analyzing
         :param repo_id: ID of the repository in the DB
-        :return: (url, backend, index_name) or None
+        :return: (url, backend) or None
         """
         with self._session_scope() as session:
             repo = session.query(self.models['Repository']).\
                 filter(self.models['Repository'].id == repo_id).\
                 first()
             if repo:
-                return repo.url, repo.backend, repo.index_name
+                return repo.url, repo.backend
         return None
 
     def _connect_db(self):

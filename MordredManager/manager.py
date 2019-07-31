@@ -126,6 +126,10 @@ class MordredManager:
             Logger.error("Token for task {} not found".format(task_id))
             self._complete_task(task_id, 'ERROR')
             return
+        if token:
+            token_id, token_key = token
+        else:
+            token_id, token_key = None, None
 
         # Update the log location in task object
         file_log = '{}/repo_{}.log'.format(DASHBOARD_LOGS, repo_id)
@@ -140,7 +144,7 @@ class MordredManager:
                    '--url', url,
                    '--index', index_name]
             if backend != 'git':
-                cmd.extend(['--token', token])
+                cmd.extend(['--token', token_key])
 
             proc = subprocess.Popen(cmd, stdout=f_log, stderr=subprocess.STDOUT)
             proc.wait()
@@ -155,7 +159,8 @@ class MordredManager:
             pending_time = datetime.datetime.now() + datetime.timedelta(minutes=wait_minutes)
             Logger.error('RateLimitError restart at [{}]'.format(pending_time))
             self._set_pending_task(task_id)
-            self._update_token_rate_time(token.id, pending_time)
+            if backend != 'git':
+                self._update_token_rate_time(token_id, pending_time)
         else:
             self._complete_task(task_id, 'COMPLETED')
 
@@ -213,7 +218,7 @@ class MordredManager:
                        self.models['Task_Tokens'].task_id == task_id).\
                 first()
             if token:
-                return token.key
+                return token.id, token.key
         return None
 
     @retry_func

@@ -31,7 +31,7 @@ Logger.setLevel(logging.DEBUG)
 DASHBOARD_LOGS = '/dashboard_logs'
 
 
-def retry_func(function, init_delay=1, backoff=2, max_delay=30):
+def retry_func(function, init_delay=1, backoff=2, max_delay=20, max_attempts=10):
     """
     Retry decorator for the database
 
@@ -47,6 +47,7 @@ def retry_func(function, init_delay=1, backoff=2, max_delay=30):
         @wraps(f)
         def f_retry(*args, **kwargs):
             delay = init_delay
+            attempts = 1
             is_retry = False
             while True:
                 if is_retry:
@@ -54,12 +55,16 @@ def retry_func(function, init_delay=1, backoff=2, max_delay=30):
                 try:
                     output = f(*args, **kwargs)
                     if is_retry:
-                        Logger.warning("Continue. {} didn't return any error".format(f.__name__))
+                        Logger.info("Continue. {} didn't return any error after the retry".format(f.__name__))
                     return output
-                except:
-                    Logger.warning("Retrying in {} seconds".format(delay))
+                except Exception as e:
+                    Logger.error("Error in {}: {}".format(f.__name__, e.args[0]))
+                    Logger.error("Retrying in {} seconds ({}/{})".format(delay, attempts, max_attempts))
                     time.sleep(delay)
                     delay *= backoff
+                    attempts += 1
+                    if attempts > max_attempts:
+                        raise Exception("The worker is in a bad state stopping...")
                     if delay > max_delay:
                         delay = max_delay
                     is_retry = True
@@ -96,6 +101,12 @@ class MordredManager:
             if waiting_msg:
                 Logger.info('Waiting for new tasks...')
                 waiting_msg = False
+
+            task = self._get_pending_task()
+            if task:
+                task_id, repository_id = task
+                Logger.info("We got a pending task! Try to analyze it again")
+                self.analyze_task(task_id, repository_id)
 
             task = self._get_task()
             if not task:
@@ -184,6 +195,7 @@ class MordredManager:
         Try to get a new task
         :return: (task_id, repository_id) or None
         """
+        id, repository_id = None, None
         with self._session_scope() as session:
             now = datetime.datetime.now()
             # Get the tasks id with a token ready and randomly selected
@@ -201,7 +213,18 @@ class MordredManager:
                     filter(self.models['Task'].id == task.id).\
                     update({'worker_id': self.worker_id, 'started': start_date, 'retries': task.retries + 1})
 
-                return task.id, task.repository_id
+                id, repository_id = task.id, task.repository_id
+
+        if id and repository_id:
+            time.sleep(1)
+            with self._session_scope() as session:
+                task_later = session.query(self.models['Task']).\
+                    filter(self.models['Task'].id == id).\
+                    first()
+                if task_later.worker_id != self.worker_id:
+                    raise Exception("Worker {} took it. Get a new task...".format(task_later.worker_id))
+                else:
+                    return id, repository_id
 
     @retry_func
     def _get_token(self, task_id):
@@ -212,6 +235,7 @@ class MordredManager:
         """
         with self._session_scope() as session:
             token = session.query(self.models['Token']).\
+                join(self.models['Task_Tokens'], self.models['Task_Tokens'].token_id==self.models['Token'].id).\
                 filter(self.models['Token'].rate_time < datetime.datetime.now(),
                        self.models['Task_Tokens'].task_id == task_id).\
                 first()
@@ -223,7 +247,7 @@ class MordredManager:
     def _complete_task(self, task_id, status):
         """
         Delete a task and create a completed task with the status parameter
-        :param task_id: Task IDto be deleted
+        :param task_id: Task ID to be deleted
         :param status: Final status of the task
         :return:
         """
@@ -235,7 +259,7 @@ class MordredManager:
                 first()
 
             if not task:
-                Logger.error('Unknown task id to complete: {}'.format(id))
+                Logger.error('Unknown task id to complete: {}'.format(task_id))
                 return
 
             completed = self.models['CompletedTask'](task_id=task.id,
@@ -379,5 +403,10 @@ class MordredManager:
 
 
 if __name__ == "__main__":
-    manager = MordredManager()
-    manager.run()
+    while True:
+        try:
+            manager = MordredManager()
+            manager.run()
+        except Exception as e:
+            Logger.error("Critical error: {}".format(e.args[0]))
+            Logger.error("Restarting the worker...")

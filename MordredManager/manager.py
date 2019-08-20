@@ -134,7 +134,7 @@ class MordredManager:
         # Update the log location in task object
         file_log = '{}/repo_{}.log'.format(DASHBOARD_LOGS, repo_id)
         self._set_file_log(task_id, file_log)
-        
+
         # Let's run mordred in a command and get the output
         Logger.info("Analyzing [{} | {}]".format(backend, url))
         # TODO: Improve as a function call
@@ -188,14 +188,13 @@ class MordredManager:
             now = datetime.datetime.now()
             # Get the tasks id with a token ready and randomly selected
             task = session.query(self.models['Task']). \
-                outerjoin(self.models['Task_Tokens']). \
-                outerjoin(self.models['Token']).\
+                outerjoin(self.models['Task_Tokens'], self.models['Task_Tokens'].task_id==self.models['Task'].id). \
+                outerjoin(self.models['Token'], self.models['Token'].id==self.models['Task_Tokens'].token_id).\
                 filter(sqlalchemy.or_(self.models['Token'].rate_time < now, self.models['Token'].rate_time == None)).\
                 filter(self.models['Task'].worker_id == '').\
                 group_by(self.models['Task_Tokens'].token_id).\
                 order_by(func.rand()).\
                 first()
-
             if task:
                 start_date = task.started if task.started else datetime.datetime.now()
                 session.query(self.models['Task']).\
@@ -372,7 +371,7 @@ class MordredManager:
             yield session
             session.commit()
         except Exception as e:
-            Logger.warning("Rollback the last session {}".format(e.args[0]))
+            Logger.warning("Rollback the last session: {}".format(e.args[0]))
             session.rollback()
             raise
         finally:

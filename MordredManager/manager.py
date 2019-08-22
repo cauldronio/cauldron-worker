@@ -135,7 +135,7 @@ class MordredManager:
         token = self._get_token(task_id)
         if not token and backend != 'git':
             Logger.error("Token for task {} not found".format(task_id))
-            self._complete_task(task_id, 'ERROR')
+            self._set_pending_task(task_id)
             return
         if token:
             token_id, token_key = token
@@ -168,9 +168,9 @@ class MordredManager:
             wait_minutes = proc.returncode
             pending_time = datetime.datetime.now() + datetime.timedelta(minutes=wait_minutes)
             Logger.error('RateLimitError restart at [{}]'.format(pending_time))
-            self._set_pending_task(task_id)
             if backend != 'git':
                 self._update_token_rate_time(token_id, pending_time)
+            self._set_pending_task(task_id)
         else:
             self._complete_task(task_id, 'COMPLETED')
 

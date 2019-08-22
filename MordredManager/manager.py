@@ -340,6 +340,7 @@ class MordredManager:
         self.models['ESUser'] = self.Base.classes.CauldronApp_esuser
         self.models['GithubUser'] = self.Base.classes.CauldronApp_githubuser
         self.models['GitlabUser'] = self.Base.classes.CauldronApp_gitlabuser
+        self.models['MeetupUser'] = self.Base.classes.CauldronApp_meetupuser
         self.models['Repository'] = self.Base.classes.CauldronApp_repository
         self.models['Repository_Dashboards'] = self.Base.classes.CauldronApp_repository_dashboards
         self.models['Task'] = self.Base.classes.CauldronApp_task

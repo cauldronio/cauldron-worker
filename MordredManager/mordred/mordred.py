@@ -39,50 +39,10 @@ def run_mordred(backend, url, token):
     if result_enrich:
         sys.exit(result_enrich)
 
-
-# TODO: Delete these 2 functions and create the alias for these indices with Ansible
-#  (There are some examples in the playbooks):
-# git_enrich_index -> git_enrich
-# git_aoc_enriched_index -> git_aoc_enriched
-# github_enrich_index -> github_enrich
-# gitlab_enriched_index -> gitlab_enriched
-
-def _update_aliases(cfg):
-    # TODO: Verify SSL Elasticsearch
-    conf = cfg.get_conf()
-    context = create_ssl_context()
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
-    es = Elasticsearch([conf['es_enrichment']['url']], timeout=100, use_ssl=True, ssl_context=context)
-
-    put_alias_no_except(es, index='git_aoc_enriched_*', name='git_aoc_enriched')
-    put_alias_no_except(es, index='git_enrich_*', name='git_enrich')
-
-    put_alias_no_except(es, index='github_enrich_*', name='github_enrich')
-
-    put_alias_no_except(es, index='gitlab_enriched_*', name='gitlab_enriched')
-
-    put_alias_no_except(es, index='git_enrich_*', name='ocean')
-    put_alias_no_except(es, index='github_enrich_*', name='ocean')
-    put_alias_no_except(es, index='gitlab_enriched_*', name='ocean')
-
-    put_alias_no_except(es, index='github_enrich_*', name='ocean_tickets')
-    put_alias_no_except(es, index='gitlab_enriched_*', name='ocean_tickets')
-
-
-def put_alias_no_except(es, index, name):
-    try:
-        es.indices.put_alias(index=index, name=name)
-    except NotFoundError:
-        pass
-
-## END TODO
-
-
 def _create_projects_file(backend, url):
     """
     Check the backend of the repository and create the projects.json for it
-    :param backend: gitlab, github, git ...
+    :param backend: gitlab, github, meetup, git ...
     :param url: url for the repository
     :return:
     """
@@ -122,6 +82,9 @@ def _create_config(projects_file, backend, token):
     # GITLAB
     cfg.set_param('gitlab', 'raw_index', "gitlab_raw_index")
     cfg.set_param('gitlab', 'enriched_index', "gitlab_enriched_index")
+    # MEETUP
+    cfg.set_param('meetup', 'raw_index', "meetup_raw_index")
+    cfg.set_param('meetup', 'enriched_index', "meetup_enriched_index")
 
     return cfg
 

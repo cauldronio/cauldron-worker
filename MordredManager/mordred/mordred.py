@@ -39,6 +39,7 @@ def run_mordred(backend, url, token):
     if result_enrich:
         sys.exit(result_enrich)
 
+
 def _create_projects_file(backend, url):
     """
     Check the backend of the repository and create the projects.json for it
@@ -107,17 +108,18 @@ def _get_raw(config, backend):
         repo = repositories[0]
         if 'error' in repo and repo['error']:
             if repo['error'].startswith('RateLimitError'):
-                restart_minutes = math.ceil(float(repo['error'].split(' ')[-1])/60) + 10
-                logging.warning("RateLimitError. This task will be restarted in: {} minutes".format(restart_minutes))
+                seconds_to_reset = float(repo['error'].split(' ')[-1])
+                restart_minutes = math.ceil(seconds_to_reset/60) + 1
+                logger.warning("RateLimitError. This task will be restarted in: {} minutes".format(restart_minutes))
                 return restart_minutes
             else:
-                logging.error(repo['error'])
+                logger.error(repo['error'])
                 return 1
 
-        logging.info("Loading raw data for %s finished!", backend)
+        logger.info("Loading raw data for %s finished!", backend)
         return None
     except Exception as e:
-        logging.warning("Error loading raw data from {}. Cause: {}".format(backend, e))
+        logger.warning("Error loading raw data from {}. Cause: {}".format(backend, e))
         return 1
 
 
@@ -136,7 +138,7 @@ def _get_enrich(config, backend):
         task.execute()
         print("Data enriched for {}".format(backend))
     except Exception as e:
-        logging.warning("Error enriching data for %s. Raising exception", backend)
+        logger.warning("Error enriching data for %s. Raising exception", backend)
         return 1
     return None
 
@@ -150,5 +152,5 @@ if __name__ == '__main__':
     try:
         run_mordred(args.backend, args.url, args.token)
     except Exception:
-        logging.error("Finished with errors")
+        logger.error("Finished with errors")
         sys.exit(1)

@@ -21,6 +21,8 @@ from elasticsearch.connection import create_ssl_context
 
 # logging.basicConfig(level=logging.INFO)
 
+logger = logging.getLogger("mordred-worker")
+
 CONFIG_PATH = 'mordred/setup-default.cfg'
 JSON_DIR_PATH = 'projects_json'
 
@@ -47,12 +49,12 @@ def _create_projects_file(backend, url):
     :param url: url for the repository
     :return:
     """
-    logging.info("Creating projects.json for {}: {}".format(backend, url))
+    logger.info("Creating projects.json for {}: {}".format(backend, url))
     if not os.path.isdir(JSON_DIR_PATH):
         try:
             os.mkdir(JSON_DIR_PATH)
         except OSError:
-            logging.error("Creation of directory %s failed", JSON_DIR_PATH)
+            logger.error("Creation of directory %s failed", JSON_DIR_PATH)
     projects = dict()
     projects['Project'] = dict()
     projects['Project'][backend] = list()
@@ -97,14 +99,14 @@ def _get_raw(config, backend):
     :param backend:
     :return: None if everything was ok, 1 for fail, other for minutes to restart
     """
-    logging.info("Loading raw data for %s", backend)
+    logger.info("Loading raw data for %s", backend)
     TaskProjects(config).execute()
     # I am not using arthur
     task = TaskRawDataCollection(config, backend_section=backend)
     try:
         repositories = task.execute()
         if len(repositories) != 1:
-            logging.error("Critical error: More than 1 repository found in the output")
+            logger.error("Critical error: More than 1 repository found in the output")
         repo = repositories[0]
         if 'error' in repo and repo['error']:
             if repo['error'].startswith('RateLimitError'):

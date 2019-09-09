@@ -104,24 +104,26 @@ class MordredManager:
 
             task = self._get_pending_task()
             if task:
-                task_id, repository_id = task
+                task_id, repository_id, token_id, token_key = task
                 Logger.info("We got a pending task! Try to analyze it again")
-                self.analyze_task(task_id, repository_id)
+                self.analyze_task(task_id, repository_id, token_id, token_key)
 
             task = self._get_task()
             if not task:
                 time.sleep(1)
                 continue
-            task_id, repository_id = task
+            task_id, repository_id, token_id, token_key = task
             Logger.info('New task found!')
-            self.analyze_task(task_id, repository_id)
+            self.analyze_task(task_id, repository_id, token_id, token_key)
             waiting_msg = True
 
-    def analyze_task(self, task_id, repo_id):
+    def analyze_task(self, task_id, repo_id, token_id, token_key):
         """
         Analyze a full task with mordred
         :param task_id:
         :param repo_id:
+        :param token_id:
+        :param token_key:
         :return:
         """
         # Get the repo for the task
@@ -131,16 +133,6 @@ class MordredManager:
             self._complete_task(task_id, 'ERROR')
             return
         url, backend = repo
-        # Get the token for the task
-        token = self._get_token(task_id)
-        if not token and backend != 'git':
-            Logger.error("Token for task {} not found".format(task_id))
-            self._set_pending_task(task_id)
-            return
-        if token:
-            token_id, token_key = token
-        else:
-            token_id, token_key = None, None
 
         # Update the log location in task object
         file_log = '{}/repo_{}.log'.format(DASHBOARD_LOGS, repo_id)
@@ -182,9 +174,9 @@ class MordredManager:
         while True:
             task = self._get_pending_task()
             if task:
-                task_id, repository_id = task
+                task_id, repository_id, token_id, token_key = task
                 Logger.info("We got a pending task! Try to analyze it again")
-                self.analyze_task(task_id, repository_id)
+                self.analyze_task(task_id, repository_id, token_id, token_key)
             else:
                 Logger.info("No pending tasks")
                 break
@@ -193,41 +185,61 @@ class MordredManager:
     def _get_task(self):
         """
         Try to get a new task
-        :return: (task_id, repository_id) or None
+        :return: (task_id, repository_id, token_id, token_key) or None
         """
-        id, repository_id = None, None
+        task_id, repository_id = None, None
         with self._session_scope() as session:
             now = datetime.datetime.now()
             # Get the tasks id with a token ready and randomly selected
-            task = session.query(self.models['Task']). \
+            tasks_tokens = session.query(self.models['Task'], self.models['Token']). \
                 outerjoin(self.models['Task_Tokens'], self.models['Task_Tokens'].task_id==self.models['Task'].id). \
-                outerjoin(self.models['Token'], self.models['Token'].id==self.models['Task_Tokens'].token_id).\
-                filter(sqlalchemy.or_(self.models['Token'].rate_time < now, self.models['Token'].rate_time == None)).\
-                filter(self.models['Task'].worker_id == '').\
-                group_by(self.models['Task_Tokens'].token_id).\
-                order_by(func.rand()).\
-                first()
-            if task:
+                outerjoin(self.models['Token'], self.models['Token'].id==self.models['Task_Tokens'].token_id)
+
+            # Filter not valid tokens
+            tokens_in_use_q = tasks_tokens.filter(self.models['Task'].worker_id != '')\
+                .distinct(self.models['Token'].id)\
+                .with_entities(self.models['Token'].id)
+            tokens_in_use = [token_id for token_id, in tokens_in_use_q if token_id is not None]
+
+            valid_tasks = tasks_tokens.filter(sqlalchemy.or_(
+                self.models['Token'].rate_time < now,
+                self.models['Token'].rate_time == None)
+            ).filter(sqlalchemy.or_(
+                self.models['Token'].id.notin_(tokens_in_use),
+                self.models['Token'].id == None)
+            ).filter(
+                self.models['Task'].worker_id == ''
+            )
+            task_and_token = valid_tasks.group_by(self.models['Task_Tokens'].token_id)\
+                .order_by(func.rand())\
+                .first()
+            if task_and_token:
+                task = task_and_token[0]
+                token = task_and_token[1]
                 start_date = task.started if task.started else datetime.datetime.now()
                 session.query(self.models['Task']).\
                     filter(self.models['Task'].id == task.id).\
                     update({'worker_id': self.worker_id, 'started': start_date, 'retries': task.retries + 1})
 
-                id, repository_id = task.id, task.repository_id
+                task_id, repository_id = task.id, task.repository_id
+                if token:
+                    token_id, token_key = token.id, token.key
+                else:
+                    token_id, token_key = None, None
 
-        if id and repository_id:
+        if task_id and repository_id:
             time.sleep(1)
             with self._session_scope() as session:
                 task_later = session.query(self.models['Task']).\
-                    filter(self.models['Task'].id == id).\
+                    filter(self.models['Task'].id == task_id).\
                     first()
                 if task_later.worker_id != self.worker_id:
                     raise Exception("Worker {} took it. Get a new task...".format(task_later.worker_id))
                 else:
-                    return id, repository_id
+                    return task_id, repository_id, token_id, token_key
 
     @retry_func
-    def _get_token(self, task_id):
+    def _get_valid_token(self, task_id):
         """
         Get a token available (Rate limit) for that task
         :param task_id: ID of the task
@@ -352,7 +364,7 @@ class MordredManager:
     def _get_pending_task(self):
         """
         Check if the worker has pending tasks (Maybe because got down)
-        :return: (id, repository_id) or None
+        :return: (task_id, repository_id, token_id, token_key) or None
         """
         with self._session_scope() as session:
             task = session.query(self.models['Task']).\
@@ -360,7 +372,12 @@ class MordredManager:
                 order_by(self.models['Task'].created).\
                 first()
             if task:
-                return task.id, task.repository_id
+                token = self._get_valid_token(task.id)
+                if token:
+                    token_id, token_key = token
+                else:
+                    token_id, token_key = None, None
+                return task.id, task.repository_id, token_id, token_key
             return None
 
     @retry_func

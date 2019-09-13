@@ -110,7 +110,7 @@ class MordredManager:
 
             task = self._get_task()
             if not task:
-                time.sleep(1)
+                time.sleep(3)
                 continue
             task_id, repository_id, token_id, token_key = task
             Logger.info('New task found!')
@@ -193,7 +193,7 @@ class MordredManager:
             # Get the tasks id with a token ready and randomly selected
             tasks_tokens = session.query(self.models['Task'], self.models['Token']). \
                 outerjoin(self.models['Task_Tokens'], self.models['Task_Tokens'].task_id==self.models['Task'].id). \
-                outerjoin(self.models['Token'], self.models['Token'].id==self.models['Task_Tokens'].token_id)
+                outerjoin(self.models['Token'], self.models['Token'].id==self.models['Task_Tokens'].token_id).with_for_update()
 
             # Filter not valid tokens
             tokens_in_use_q = tasks_tokens.filter(self.models['Task'].worker_id != '')\
@@ -227,16 +227,7 @@ class MordredManager:
                 else:
                     token_id, token_key = None, None
 
-        if task_id and repository_id:
-            time.sleep(1)
-            with self._session_scope() as session:
-                task_later = session.query(self.models['Task']).\
-                    filter(self.models['Task'].id == task_id).\
-                    first()
-                if task_later.worker_id != self.worker_id:
-                    raise Exception("Worker {} took it. Get a new task...".format(task_later.worker_id))
-                else:
-                    return task_id, repository_id, token_id, token_key
+                return task_id, repository_id, token_id, token_key
 
     @retry_func
     def _get_valid_token(self, task_id):
@@ -246,11 +237,12 @@ class MordredManager:
         :return: Token or None
         """
         with self._session_scope() as session:
-            token = session.query(self.models['Token']).\
+            tokens = session.query(self.models['Token']).\
                 join(self.models['Task_Tokens'], self.models['Task_Tokens'].token_id==self.models['Token'].id).\
                 filter(self.models['Token'].rate_time < datetime.datetime.now(),
-                       self.models['Task_Tokens'].task_id == task_id).\
-                first()
+                       self.models['Task_Tokens'].task_id == task_id).with_for_update()
+            token = tokens.first()
+
             if token:
                 return token.id, token.key
         return None
@@ -367,10 +359,10 @@ class MordredManager:
         :return: (task_id, repository_id, token_id, token_key) or None
         """
         with self._session_scope() as session:
-            task = session.query(self.models['Task']).\
+            tasks = session.query(self.models['Task']).\
                 filter(self.models['Task'].worker_id == self.worker_id).\
-                order_by(self.models['Task'].created).\
-                first()
+                order_by(self.models['Task'].created).with_for_update()
+            task = tasks.first()
             if task:
                 token = self._get_valid_token(task.id)
                 if token:

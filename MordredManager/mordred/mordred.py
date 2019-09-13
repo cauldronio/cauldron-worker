@@ -19,7 +19,7 @@ import sqlalchemy
 import ssl
 from elasticsearch.connection import create_ssl_context
 
-# logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger("mordred-worker")
 

@@ -274,7 +274,8 @@ class MordredManager:
                                                      completed=datetime.datetime.now(),
                                                      retries=task.retries,
                                                      status=status,
-                                                     log_file=task.log_file)
+                                                     log_file=task.log_file,
+                                                     old=False)
             session.add(completed)
 
             # Delete the task

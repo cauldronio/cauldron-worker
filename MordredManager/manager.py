@@ -110,7 +110,7 @@ class MordredManager:
 
             task = self._get_task()
             if not task:
-                time.sleep(3)
+                time.sleep(10)
                 continue
             task_id, repository_id, token_id, token_key = task
             Logger.info('New task found!')
@@ -194,7 +194,8 @@ class MordredManager:
             tasks_tokens = session.query(self.models['Task'], self.models['Token']). \
                 outerjoin(self.models['Task_Tokens'], self.models['Task_Tokens'].task_id==self.models['Task'].id). \
                 outerjoin(self.models['Token'], self.models['Token'].id==self.models['Task_Tokens'].token_id).with_for_update()
-
+            # Do not remove: We need to lock the table with this line and with "with_for_update()"
+            tasks_tokens.all()
             # Filter not valid tokens
             tokens_in_use_q = tasks_tokens.filter(self.models['Task'].worker_id != '')\
                 .distinct(self.models['Token'].id)\
@@ -237,10 +238,10 @@ class MordredManager:
         :return: Token or None
         """
         with self._session_scope() as session:
-            tokens = session.query(self.models['Token']).\
-                join(self.models['Task_Tokens'], self.models['Task_Tokens'].token_id==self.models['Token'].id).\
-                filter(self.models['Token'].rate_time < datetime.datetime.now(),
-                       self.models['Task_Tokens'].task_id == task_id).with_for_update()
+            tokens = session.query(self.models['Token'])\
+                .join(self.models['Task_Tokens'], self.models['Task_Tokens'].token_id==self.models['Token'].id)\
+                .filter(self.models['Task_Tokens'].task_id == task_id)\
+                .filter(self.models['Token'].rate_time < datetime.datetime.now())
             token = tokens.first()
 
             if token:
@@ -331,7 +332,7 @@ class MordredManager:
             except (sqlalchemy.exc.OperationalError, AttributeError) as e:
                 Logger.warning("Error from database. {}".format(e.args[0]))
                 Logger.info("RETRY IN 2 SECONDS...")
-                time.sleep(2)
+                time.sleep(10)
                 continue
 
         Logger.info("We are ready!")
@@ -361,16 +362,29 @@ class MordredManager:
         with self._session_scope() as session:
             tasks = session.query(self.models['Task']).\
                 filter(self.models['Task'].worker_id == self.worker_id).\
-                order_by(self.models['Task'].created).with_for_update()
+                order_by(self.models['Task'].created)
             task = tasks.first()
-            if task:
+            if not task:
+                return
+
+            repo = self._get_repo(task.repository_id)
+            if not repo:
+                Logger.error("Repo for task {} not found".format(task.id))
+                self._complete_task(task.id, 'ERROR')
+                return
+
+            repo_id, repo_backend = repo
+            if repo_backend not in ['git']:
                 token = self._get_valid_token(task.id)
                 if token:
                     token_id, token_key = token
                 else:
-                    token_id, token_key = None, None
-                return task.id, task.repository_id, token_id, token_key
-            return None
+                    self._set_pending_task(task.id)
+                    return
+            else:
+                token_id, token_key = None, None
+            task_id, task_repository_id = task.id, task.repository_id
+        return task_id, task_repository_id, token_id, token_key
 
     @retry_func
     def _set_pending_task(self, task_id):

@@ -1,6 +1,7 @@
 import os
 import time
 import datetime
+import shutil
 import logging
 import subprocess
 from contextlib import contextmanager
@@ -72,6 +73,14 @@ def retry_func(function, init_delay=1, backoff=2, max_delay=20, max_attempts=10)
     return deco_retry(function)
 
 
+def remove_perceval_dir():
+    """
+    Delete .perceval directory in home directory
+    :return:
+    """
+    shutil.rmtree(os.path.expanduser(os.path.join('~', '.perceval')))
+
+
 class MordredManager:
     def __init__(self):
         self.db_config = {
@@ -96,6 +105,7 @@ class MordredManager:
         """
         self._connect_db()
         self.recovery()
+        remove_perceval_dir()
         waiting_msg = True
         while True:
             if waiting_msg:
@@ -165,6 +175,7 @@ class MordredManager:
             self._set_pending_task(task_id)
         else:
             self._complete_task(task_id, 'COMPLETED')
+        remove_perceval_dir()
 
     def recovery(self):
         """

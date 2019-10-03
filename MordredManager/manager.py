@@ -78,7 +78,11 @@ def remove_perceval_dir():
     Delete .perceval directory in home directory
     :return:
     """
-    shutil.rmtree(os.path.expanduser(os.path.join('~', '.perceval')))
+    try:
+        shutil.rmtree(os.path.expanduser(os.path.join('~', '.perceval')))
+    except FileNotFoundError:
+        Logger.warning("Cannot remove .perceval directory, doesn't exist")
+        pass
 
 
 class MordredManager:

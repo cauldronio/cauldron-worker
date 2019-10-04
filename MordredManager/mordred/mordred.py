@@ -22,10 +22,30 @@ logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("mordred-worker")
 
 
-def run_mordred(backend, url, token):
+def setup_logs():
+    """
+    Config logging level output
+    """
+    logging_levels = {
+        'CRITICAL': logging.CRITICAL,
+        'FATAL': logging.FATAL,
+        'ERROR': logging.ERROR,
+        'WARN': logging.WARNING,
+        'WARNING': logging.WARNING,
+        'INFO': logging.INFO,
+        'DEBUG': logging.DEBUG
+    }
+
+    level_env = os.getenv('LOG_LEVEL', '')
+    level = logging_levels.get(level_env, logging.WARNING)
+
+    logger.setLevel(level)
+
+
+def run_mordred(backend, url, token, git_path=None):
     print("\n====== Starts (UTC) ======\n{}\n==========================\n".format(datetime.now()))
     projects_file = _create_projects_file(backend, url)
-    cfg = _create_config(projects_file, backend, token)
+    cfg = _create_config(projects_file, backend, token, git_path)
     result_raw = _get_raw(cfg, backend)
     result_enrich = _get_enrich(cfg, backend)
     #_update_aliases(cfg)
@@ -64,7 +84,7 @@ def _create_projects_file(backend, url):
     return projects_file.name
 
 
-def _create_config(projects_file, backend, token):
+def _create_config(projects_file, backend, token, git_path=None):
     cfg = Config(CONFIG_PATH)
     if backend != 'git':
         cfg.set_param(backend, 'api-token', token)
@@ -72,6 +92,8 @@ def _create_config(projects_file, backend, token):
     # GIT
     cfg.set_param('git', 'raw_index', "git_raw_index")
     cfg.set_param('git', 'enriched_index', "git_enrich_index")
+    if git_path:
+        cfg.set_param('git', 'git-path', git_path)
     cfg.set_param('enrich_areas_of_code:git', 'in_index', "git_raw_index")
     cfg.set_param('enrich_areas_of_code:git', 'out_index', "git_aoc_enriched_index")
     # GITHUB
@@ -147,10 +169,14 @@ if __name__ == '__main__':
     parser.add_argument('--backend', type=str, help='Backend to analyze')
     parser.add_argument('--url', type=str, help='URL repository to analyze')
     parser.add_argument('--token', type=str, help='token for the analysis', default="")
+    parser.add_argument('--git-path', dest='git_path', type=str,
+                        help='path where the Git repository will be cloned', default=None)
     args = parser.parse_args()
     try:
-        run_mordred(args.backend, args.url, args.token)
+        setup_logs()
+        run_mordred(args.backend, args.url, args.token, args.git_path)
     except Exception:
+        traceback.print_exc()
         logger.error("Finished with errors")
         traceback.print_exc()
         sys.exit(1)

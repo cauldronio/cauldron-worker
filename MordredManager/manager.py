@@ -1,7 +1,6 @@
 import os
 import time
 import datetime
-import shutil
 import logging
 import subprocess
 from contextlib import contextmanager
@@ -31,6 +30,8 @@ Logger.addHandler(log_handler)
 Logger.setLevel(logging.DEBUG)
 
 DASHBOARD_LOGS = '/dashboard_logs'
+PERCEVAL_GITPATH = '/git-perceval'
+BACKENDS_WITH_TOKEN = ('github', 'gitlab', 'meetup')
 
 
 def retry_func(function, init_delay=1, backoff=2, max_delay=20, max_attempts=10):
@@ -74,18 +75,6 @@ def retry_func(function, init_delay=1, backoff=2, max_delay=20, max_attempts=10)
     return deco_retry(function)
 
 
-def remove_perceval_dir():
-    """
-    Delete .perceval directory in home directory
-    :return:
-    """
-    try:
-        shutil.rmtree(os.path.expanduser(os.path.join('~', '.perceval')))
-    except FileNotFoundError:
-        Logger.warning("Cannot remove .perceval directory, doesn't exist")
-        pass
-
-
 class MordredManager:
     def __init__(self):
         self.db_config = {
@@ -110,7 +99,6 @@ class MordredManager:
         """
         self._connect_db()
         self.recovery()
-        remove_perceval_dir()
         waiting_msg = True
         while True:
             if waiting_msg:
@@ -160,7 +148,11 @@ class MordredManager:
             cmd = ['python3', '-u', 'mordred/mordred.py',
                    '--backend', backend,
                    '--url', url]
-            if backend != 'git':
+            if backend == 'git':
+                processed_uri = url.lstrip('/')
+                git_path = os.path.join(PERCEVAL_GITPATH, processed_uri) + '-git'
+                cmd.extend(['--git-path', git_path])
+            if backend in BACKENDS_WITH_TOKEN:
                 if token_key:
                     cmd.extend(['--token', token_key])
                 else:
@@ -180,12 +172,11 @@ class MordredManager:
             wait_minutes = proc.returncode
             pending_time = datetime.datetime.now() + datetime.timedelta(minutes=wait_minutes)
             Logger.error('RateLimitError restart at [{}]'.format(pending_time))
-            if backend != 'git':
+            if backend in BACKENDS_WITH_TOKEN:
                 self._update_token_rate_time(token_id, pending_time)
             self._set_pending_task(task_id)
         else:
             self._complete_task(task_id, 'COMPLETED')
-        remove_perceval_dir()
 
     def recovery(self):
         """
@@ -396,7 +387,7 @@ class MordredManager:
                 return
 
             repo_id, repo_backend = repo
-            if repo_backend not in ['git']:
+            if repo_backend in BACKENDS_WITH_TOKEN:
                 token = self._get_valid_token(task.id)
                 if token:
                     token_id, token_key = token

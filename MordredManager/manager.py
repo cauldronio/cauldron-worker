@@ -6,6 +6,7 @@ import logging
 import subprocess
 from contextlib import contextmanager
 from functools import wraps
+import traceback
 
 import sqlalchemy
 from sqlalchemy import create_engine
@@ -160,7 +161,12 @@ class MordredManager:
                    '--backend', backend,
                    '--url', url]
             if backend != 'git':
-                cmd.extend(['--token', token_key])
+                if token_key:
+                    cmd.extend(['--token', token_key])
+                else:
+                    Logger.error("Key not found for task {}".format(task_id))
+                    self._complete_task(task_id, 'ERROR')
+                    return
 
             proc = subprocess.Popen(cmd, stdout=f_log, stderr=subprocess.STDOUT)
             proc.wait()
@@ -448,5 +454,7 @@ if __name__ == "__main__":
             manager = MordredManager()
             manager.run()
         except Exception as e:
+            traceback.print_exc()
             Logger.error("Critical error: {}".format(e.args[0]))
-            Logger.error("Restarting the worker...")
+            Logger.error("Restarting the worker in 5 seconds...")
+            time.sleep(5)

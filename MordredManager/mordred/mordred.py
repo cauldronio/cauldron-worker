@@ -7,24 +7,19 @@ import argparse
 import math
 from datetime import datetime
 
-from elasticsearch import Elasticsearch
-from elasticsearch.exceptions import NotFoundError
-
 from sirmordred.config import Config
 from sirmordred.task_collection import TaskRawDataCollection
 from sirmordred.task_enrich import TaskEnrich
 from sirmordred.task_projects import TaskProjects
 
 import sqlalchemy
-import ssl
-from elasticsearch.connection import create_ssl_context
-
-logging.basicConfig(level=logging.INFO)
-
-logger = logging.getLogger("mordred-worker")
+import traceback
 
 CONFIG_PATH = 'mordred/setup-default.cfg'
 JSON_DIR_PATH = 'projects_json'
+
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger("mordred-worker")
 
 
 def run_mordred(backend, url, token):
@@ -122,6 +117,7 @@ def _get_raw(config, backend):
         return None
     except Exception as e:
         logger.warning("Error loading raw data from {}. Cause: {}".format(backend, e))
+        traceback.print_exc()
         return 1
 
 
@@ -141,6 +137,7 @@ def _get_enrich(config, backend):
         print("Data enriched for {}".format(backend))
     except Exception as e:
         logger.warning("Error enriching data for %s. Raising exception", backend)
+        traceback.print_exc()
         return 1
     return None
 
@@ -155,4 +152,5 @@ if __name__ == '__main__':
         run_mordred(args.backend, args.url, args.token)
     except Exception:
         logger.error("Finished with errors")
+        traceback.print_exc()
         sys.exit(1)

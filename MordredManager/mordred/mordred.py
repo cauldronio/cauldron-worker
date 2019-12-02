@@ -10,6 +10,7 @@ from datetime import datetime
 from sirmordred.config import Config
 from sirmordred.task_collection import TaskRawDataCollection
 from sirmordred.task_enrich import TaskEnrich
+from sirmordred.task_identities import TaskIdentitiesMerge
 from sirmordred.task_projects import TaskProjects
 
 import sqlalchemy
@@ -22,42 +23,26 @@ logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("mordred-worker")
 
 
-def setup_logs():
-    """
-    Config logging level output
-    """
-    logging_levels = {
-        'CRITICAL': logging.CRITICAL,
-        'FATAL': logging.FATAL,
-        'ERROR': logging.ERROR,
-        'WARN': logging.WARNING,
-        'WARNING': logging.WARNING,
-        'INFO': logging.INFO,
-        'DEBUG': logging.DEBUG
-    }
-
-    level_env = os.getenv('LOG_LEVEL', '')
-    level = logging_levels.get(level_env, logging.WARNING)
-
-    logger.setLevel(level)
-
-
 def run_mordred(backend, url, token, git_path=None):
     print("\n====== Starts (UTC) ======\n{}\n==========================\n".format(datetime.now()))
-    projects_file = _create_projects_file(backend, url)
-    cfg = _create_config(projects_file, backend, token, git_path)
-    result_raw = _get_raw(cfg, backend)
-    result_enrich = _get_enrich(cfg, backend)
-    #_update_aliases(cfg)
+    projects_file = create_projects_file(backend, url)
+    cfg = create_config(projects_file, backend, token, git_path)
+    result_raw = get_raw(cfg, backend)
+    if cfg.get_conf()['sortinghat']:
+        result_identities = merge_identities(cfg)
+    result_enrich = get_enrich(cfg, backend)
     print("\n====== Finish (UTC) ======\n{}\n==========================\n".format(datetime.now()))
+
     # Check errors
     if result_raw:
         sys.exit(result_raw)
     if result_enrich:
         sys.exit(result_enrich)
+    if result_identities:
+        sys.exit(result_identities)
 
 
-def _create_projects_file(backend, url):
+def create_projects_file(backend, url):
     """
     Check the backend of the repository and create the projects.json for it
     :param backend: gitlab, github, meetup, git ...
@@ -84,7 +69,7 @@ def _create_projects_file(backend, url):
     return projects_file.name
 
 
-def _create_config(projects_file, backend, token, git_path=None):
+def create_config(projects_file, backend, token, git_path=None):
     cfg = Config(CONFIG_PATH)
     if backend != 'git':
         cfg.set_param(backend, 'api-token', token)
@@ -109,7 +94,7 @@ def _create_config(projects_file, backend, token, git_path=None):
     return cfg
 
 
-def _get_raw(config, backend):
+def get_raw(config, backend):
     """
     Execute the collection of raw data. If a exception is occurred it is returned
     :param config:
@@ -118,7 +103,6 @@ def _get_raw(config, backend):
     """
     logger.info("Loading raw data for %s", backend)
     TaskProjects(config).execute()
-    # I am not using arthur
     task = TaskRawDataCollection(config, backend_section=backend)
     try:
         repositories = task.execute()
@@ -143,7 +127,23 @@ def _get_raw(config, backend):
         return 1
 
 
-def _get_enrich(config, backend):
+def merge_identities(config):
+    """Execute the merge identities phase
+    :param config: a Mordred config object
+    """
+    print("Merging identities from Sortinghat")
+    TaskProjects(config).execute()
+    task = TaskIdentitiesMerge(config)
+    try:
+        task.execute()
+        print("Identities merged")
+    except Exception as e:
+        logger.error("Error merging identities. Cause: {}".format(e))
+        traceback.print_exc()
+        return 1
+
+
+def get_enrich(config, backend):
     print("Enriching data for {}".format(backend))
     TaskProjects(config).execute()
     task = None
@@ -164,16 +164,40 @@ def _get_enrich(config, backend):
     return None
 
 
-if __name__ == '__main__':
+def config_logging():
+    """
+    Config logging level output
+    """
+    logging_levels = {
+        'CRITICAL': logging.CRITICAL,
+        'FATAL': logging.FATAL,
+        'ERROR': logging.ERROR,
+        'WARN': logging.WARNING,
+        'WARNING': logging.WARNING,
+        'INFO': logging.INFO,
+        'DEBUG': logging.DEBUG
+    }
+    level_env = os.getenv('LOG_LEVEL', '')
+    level = logging_levels.get(level_env, logging.WARNING)
+    logger.setLevel(level)
+
+
+def get_params():
+    """Get params to execute mordred"""
     parser = argparse.ArgumentParser(description="Run mordred for a repository")
     parser.add_argument('--backend', type=str, help='Backend to analyze')
     parser.add_argument('--url', type=str, help='URL repository to analyze')
     parser.add_argument('--token', type=str, help='token for the analysis', default="")
     parser.add_argument('--git-path', dest='git_path', type=str,
                         help='path where the Git repository will be cloned', default=None)
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+    args = get_params()
+    config_logging()
+
     try:
-        setup_logs()
         run_mordred(args.backend, args.url, args.token, args.git_path)
     except Exception:
         traceback.print_exc()

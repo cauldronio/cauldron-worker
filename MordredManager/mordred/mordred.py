@@ -28,8 +28,10 @@ def run_mordred(backend, url, token, git_path=None):
     projects_file = create_projects_file(backend, url)
     cfg = create_config(projects_file, backend, token, git_path)
     result_raw = get_raw(cfg, backend)
-    if cfg.get_conf()['sortinghat']:
+    if cfg.get_conf()['phases']['identities']:
         result_identities = merge_identities(cfg)
+    else:
+        result_identities = None
     result_enrich = get_enrich(cfg, backend)
     print("\n====== Finish (UTC) ======\n{}\n==========================\n".format(datetime.now()))
 

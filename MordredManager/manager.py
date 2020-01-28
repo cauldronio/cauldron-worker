@@ -2,6 +2,7 @@ import os
 import time
 import datetime
 import logging
+import random
 import subprocess
 from contextlib import contextmanager
 from functools import wraps
@@ -156,8 +157,10 @@ class MordredManager:
                 if token_key:
                     cmd.extend(['--token', token_key])
                 else:
-                    Logger.error("Key not found for task {}".format(task_id))
-                    self._complete_task(task_id, 'ERROR')
+                    Logger.error("Key not found for task {}. Set as pending".format(task_id))
+                    self._set_pending_task(task_id)
+                    # Sleep some seconds to avoid same error
+                    time.sleep(random.random()*5)
                     return
 
             proc = subprocess.Popen(cmd, stdout=f_log, stderr=subprocess.STDOUT)

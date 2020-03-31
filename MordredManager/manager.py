@@ -358,7 +358,6 @@ class MordredManager:
         self.models['AnonymousUser'] = self.Base.classes.CauldronApp_anonymoususer
         self.models['CompletedTask'] = self.Base.classes.CauldronApp_completedtask
         self.models['Dashboard'] = self.Base.classes.CauldronApp_dashboard
-        self.models['ESUser'] = self.Base.classes.CauldronApp_esuser
         self.models['GithubUser'] = self.Base.classes.CauldronApp_githubuser
         self.models['GitlabUser'] = self.Base.classes.CauldronApp_gitlabuser
         self.models['MeetupUser'] = self.Base.classes.CauldronApp_meetupuser

@@ -25,14 +25,17 @@ logger = logging.getLogger("mordred-worker")
 
 def run_mordred(backend, url, token, git_path=None):
     print("\n====== Starts (UTC) ======\n{}\n==========================\n".format(datetime.now()))
+
     projects_file = create_projects_file(backend, url)
     cfg = create_config(projects_file, backend, token, git_path)
-    result_raw = get_raw(cfg, backend)
+
+    result_raw = get_raw(cfg)
     if cfg.get_conf()['phases']['identities']:
         result_identities = merge_identities(cfg)
     else:
         result_identities = None
-    result_enrich = get_enrich(cfg, backend)
+    result_enrich = get_enrich(cfg)
+
     print("\n====== Finish (UTC) ======\n{}\n==========================\n".format(datetime.now()))
 
     # Check errors
@@ -47,7 +50,7 @@ def run_mordred(backend, url, token, git_path=None):
 def create_projects_file(backend, url):
     """
     Check the backend of the repository and create the projects.json for it
-    :param backend: gitlab, github, meetup, git ...
+    :param backend: git, gitlab, github or meetup
     :param url: url for the repository
     :return:
     """
@@ -57,10 +60,23 @@ def create_projects_file(backend, url):
             os.mkdir(JSON_DIR_PATH)
         except OSError:
             logger.error("Creation of directory %s failed", JSON_DIR_PATH)
-    projects = dict()
-    projects['Project'] = dict()
-    projects['Project'][backend] = list()
-    projects['Project'][backend].append(url)
+            raise
+    projects = {'Project': {}}
+    if backend == 'git':
+        projects['Project']['git'] = [url]
+    elif backend == 'github':
+        projects['Project']['github:issue'] = [url]
+        # projects['Project']['github:pull'] = [url]
+        projects['Project']['github:repo'] = [url]
+        projects['Project']['github2:issue'] = [url]
+        # projects['Project']['github2:pull'] = [url]
+    elif backend == 'gitlab':
+        projects['Project']['gitlab:issue'] = [url]
+        projects['Project']['gitlab:merge'] = [url]
+    elif backend == 'meetup':
+        projects['Project']['meetup'] = [url]
+    else:
+        raise Exception('Unknown backend {}'.format(backend))
 
     projects_file = tempfile.NamedTemporaryFile('w+',
                                                 prefix='projects_',
@@ -71,99 +87,107 @@ def create_projects_file(backend, url):
     return projects_file.name
 
 
-def create_config(projects_file, backend, token, git_path=None):
+def create_config(projects_file, backend, token=None, git_path=None):
     cfg = Config(CONFIG_PATH)
-    if backend != 'git':
-        cfg.set_param(backend, 'api-token', token)
-    cfg.set_param('projects', 'projects_file', projects_file)
-    # GIT
-    cfg.set_param('git', 'raw_index', "git_raw_index")
-    cfg.set_param('git', 'enriched_index', "git_enrich_index")
-    if git_path:
+    if backend == 'git' and git_path:
         cfg.set_param('git', 'git-path', git_path)
-    cfg.set_param('enrich_areas_of_code:git', 'in_index', "git_raw_index")
-    cfg.set_param('enrich_areas_of_code:git', 'out_index', "git_aoc_enriched_index")
-    # GITHUB
-    cfg.set_param('github', 'raw_index', "github_raw_index")
-    cfg.set_param('github', 'enriched_index', "github_enrich_index")
-    # GITLAB
-    cfg.set_param('gitlab', 'raw_index', "gitlab_raw_index")
-    cfg.set_param('gitlab', 'enriched_index', "gitlab_enriched_index")
-    # MEETUP
-    cfg.set_param('meetup', 'raw_index', "meetup_raw_index")
-    cfg.set_param('meetup', 'enriched_index', "meetup_enriched_index")
+    elif backend == 'github':
+        cfg.set_param('github:issue', 'api-token', token)
+        # cfg.set_param('github:pull', 'api-token', token)
+        cfg.set_param('github:repo', 'api-token', token)
+        cfg.set_param('github2:issue', 'api-token', token)
+        # cfg.set_param('github2:pull', 'api-token', token)
+    elif backend == 'gitlab':
+        cfg.set_param('gitlab:issue', 'api-token', token)
+        cfg.set_param('gitlab:merge', 'api-token', token)
+    elif backend == 'meetup':
+        cfg.set_param('meetup', 'api-token', token)
+    else:
+        raise Exception('Unknown backend {}'.format(backend))
+    cfg.set_param('projects', 'projects_file', projects_file)
 
     return cfg
 
 
-def get_raw(config, backend):
+def get_raw(config):
     """
     Execute the collection of raw data. If a exception is occurred it is returned
     :param config:
-    :param backend:
     :return: None if everything was ok, 1 for fail, other for minutes to restart
     """
-    logger.info("Loading raw data for %s", backend)
     TaskProjects(config).execute()
-    task = TaskRawDataCollection(config, backend_section=backend)
-    try:
-        repositories = task.execute()
-        if len(repositories) != 1:
-            logger.error("Critical error: More than 1 repository found in the output")
-        repo = repositories[0]
-        if 'error' in repo and repo['error']:
-            if repo['error'].startswith('RateLimitError'):
-                seconds_to_reset = float(repo['error'].split(' ')[-1])
-                restart_minutes = math.ceil(seconds_to_reset/60) + 2
-                logger.warning("RateLimitError. This task will be restarted in: {} minutes".format(restart_minutes))
-                return restart_minutes
-            else:
-                logger.error(repo['error'])
-                return 1
+    backend_sections = _get_backend_sections()
+    for backend in backend_sections:
+        print("==>\tStart raw data retrieval from {}".format(backend))
 
-        logger.info("Loading raw data for %s finished!", backend)
-        return None
-    except Exception as e:
-        logger.warning("Error loading raw data from {}. Cause: {}".format(backend, e))
-        traceback.print_exc()
-        return 1
+        task = TaskRawDataCollection(config, backend_section=backend)
+
+        try:
+            output_repos = task.execute()
+            if len(output_repos) != 1:
+                logger.error("More than 1 repository found in the output")
+            repo = output_repos[0]
+            if 'error' in repo and repo['error']:
+                logger.error(repo['error'])
+                if repo['error'].startswith('RateLimitError'):
+                    seconds_to_reset = float(repo['error'].split(' ')[-1])
+                    restart_minutes = math.ceil(seconds_to_reset/60) + 2
+                    logger.warning("RateLimitError. This task will be restarted in: {} minutes".format(restart_minutes))
+                    return restart_minutes
+
+        except Exception as e:
+            logger.error("Error in raw data retrieval from {}. Cause: {}".format(backend, e))
+            traceback.print_exc()
+            return 1
+
+
+def _get_backend_sections():
+    """
+    Return a list of the backend sections defined in project.json
+    :return:
+    """
+    projects = TaskProjects.get_projects()
+    if len(projects.keys()) != 1:
+        raise Exception('More than one project found. Not allowed. {}'.format(projects))
+    for pro in projects:
+        return list(projects[pro])
 
 
 def merge_identities(config):
     """Execute the merge identities phase
     :param config: a Mordred config object
     """
-    print("Merging identities from Sortinghat")
+    print("==>\tMerging identities from Sortinghat")
     TaskProjects(config).execute()
     task = TaskIdentitiesMerge(config)
     try:
         task.execute()
-        print("Identities merged")
+        print("==>\tIdentities merged")
     except Exception as e:
         logger.error("Error merging identities. Cause: {}".format(e))
         traceback.print_exc()
         return 1
 
 
-def get_enrich(config, backend):
-    print("Enriching data for {}".format(backend))
+def get_enrich(config):
     TaskProjects(config).execute()
-    task = None
-    while not task:
-        try:
-            task = TaskEnrich(config, backend_section=backend)
-        except sqlalchemy.exc.InternalError:
-            # There is a race condition in the code
-            task = None
+    backend_sections = _get_backend_sections()
+    for backend in backend_sections:
+        print("==>\tStart enrich for {}".format(backend))
+        task = None
+        while not task:
+            try:
+                task = TaskEnrich(config, backend_section=backend)
+            except sqlalchemy.exc.InternalError:
+                # There is a race condition in the code
+                task = None
 
-    try:
-        task.execute()
-        print("Data enriched for {}".format(backend))
-    except Exception as e:
-        logger.warning("Error enriching data for %s. Raising exception", backend)
-        traceback.print_exc()
-        return 1
-    return None
+        try:
+            task.execute()
+        except Exception as e:
+            logger.warning("Error enriching data for %s. Raising exception", backend)
+            traceback.print_exc()
+            return 1
 
 
 def config_logging():

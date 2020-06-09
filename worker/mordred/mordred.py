@@ -10,13 +10,12 @@ from datetime import datetime
 from sirmordred.config import Config
 from sirmordred.task_collection import TaskRawDataCollection
 from sirmordred.task_enrich import TaskEnrich
-from sirmordred.task_identities import TaskIdentitiesMerge
 from sirmordred.task_projects import TaskProjects
 
 import sqlalchemy
 import traceback
 
-CONFIG_PATH = 'mordred/setup-default.cfg'
+CONFIG_PATH = 'mordred/setup.cfg'
 JSON_DIR_PATH = 'projects_json'
 
 logging.basicConfig(level=logging.WARNING)
@@ -30,10 +29,6 @@ def run_mordred(backend, url, token, git_path=None):
     cfg = create_config(projects_file, backend, token, git_path)
 
     result_raw = get_raw(cfg)
-    if cfg.get_conf()['phases']['identities']:
-        result_identities = merge_identities(cfg)
-    else:
-        result_identities = None
     result_enrich = get_enrich(cfg)
 
     print("\n====== Finish (UTC) ======\n{}\n==========================\n".format(datetime.now()))
@@ -43,8 +38,6 @@ def run_mordred(backend, url, token, git_path=None):
         sys.exit(result_raw)
     if result_enrich:
         sys.exit(result_enrich)
-    if result_identities:
-        sys.exit(result_identities)
 
 
 def create_projects_file(backend, url):
@@ -151,22 +144,6 @@ def _get_backend_sections():
         raise Exception('More than one project found. Not allowed. {}'.format(projects))
     for pro in projects:
         return list(projects[pro])
-
-
-def merge_identities(config):
-    """Execute the merge identities phase
-    :param config: a Mordred config object
-    """
-    print("==>\tMerging identities from Sortinghat")
-    TaskProjects(config).execute()
-    task = TaskIdentitiesMerge(config)
-    try:
-        task.execute()
-        print("==>\tIdentities merged")
-    except Exception as e:
-        logger.error("Error merging identities. Cause: {}".format(e))
-        traceback.print_exc()
-        return 1
 
 
 def get_enrich(config):
